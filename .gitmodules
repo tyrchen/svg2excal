@@ -1,0 +1,9 @@
+[submodule "vendors/excalidraw"]
+	path = vendors/excalidraw
+	url = https://github.com/excalidraw/excalidraw.git
+[submodule "vendors/resvg"]
+	path = vendors/resvg
+	url = https://github.com/linebender/resvg.git
+[submodule "vendors/svg-to-excalidraw"]
+	path = vendors/svg-to-excalidraw
+	url = https://github.com/excalidraw/svg-to-excalidraw.git

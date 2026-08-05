@@ -1,3 +1,3 @@
 # Specs
 
-All specs that for AI to generate code.
+Start with the [specification index](./index.md). It gives the reading order, build-order graph, research basis, and links to every normative document.

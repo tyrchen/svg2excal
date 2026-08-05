@@ -4,20 +4,55 @@ resolver = "3"
 
 [workspace.package]
 version = "0.1.0"
-authors = ["Your Name <YourName@yourdomain.com>"]
+authors = ["svg2excal maintainers"]
 edition = "2024"
 license = "MIT"
-documentation = "https://docs.rs/"
-repository = "https://github.com/TODO"
-homepage = "https://github.com/TODO"
+rust-version = "1.97.1"
+documentation = "https://docs.rs/svg2excal-core"
+repository = "https://github.com/tyrchen/svg2excal"
+homepage = "https://github.com/tyrchen/svg2excal"
 readme = "README.md"
 
 [workspace.dependencies]
-anyhow = "1.0.102"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.142"
-thiserror = "2.0.18"
-tokio = { version = "1.52", features = ["rt", "rt-multi-thread", "macros"] }
+anyhow = "1.0.104"
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio", "tracing"] }
+base64 = "0.23.1"
+blake3 = "1.8.5"
+bytes = { version = "1.12.1", features = ["serde"] }
+clap = { version = "4.6.5", features = ["derive"] }
+config = { version = "0.15.25", default-features = false, features = ["yaml"] }
+flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
+http = "1.5.0"
+http-body-util = "0.1.4"
+proptest = "1.11.0"
+resvg = { version = "0.48.1", default-features = false, features = ["raster-images", "text"] }
+rstest = "0.26.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tempfile = "3.27.0"
+thiserror = "2.0.19"
+tokio = { version = "1.53.1", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tower = { version = "0.5.3", features = ["limit", "timeout", "util"] }
+tower-http = { version = "0.7.0", features = ["limit", "trace"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }
+typed-builder = "0.23.2"
+usvg = { version = "0.48.1", default-features = false, features = ["text"] }
+validator = { version = "0.21.0", features = ["derive"] }
 
 # workspace crates
 svg2excal-core = { path = "crates/core" }
+
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+missing_docs = "warn"
+rust_2024_compatibility = "warn"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+unwrap_used = "deny"
