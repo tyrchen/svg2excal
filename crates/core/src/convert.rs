@@ -62,10 +62,13 @@ fn convert_internal(
     options: &ConversionOptions,
     resources: Option<&ResourceContext<'_>>,
 ) -> Result<ConversionResult, ConversionError> {
+    options.check_cancelled()?;
     let normalized = normalize(svg, options, resources)?;
+    options.check_cancelled()?;
     let scene_scale = scene_scale(&normalized, options)?;
     let mut context = LoweringContext::new(options, &normalized, scene_scale)?;
     context.lower_group(normalized.tree.root(), 1.0)?;
+    options.check_cancelled()?;
     context.finalize_groups()?;
     if context.arrow_count > 0 {
         context.diagnostics.push(ConversionDiagnostic::new(
@@ -275,6 +278,7 @@ impl<'a> LoweringContext<'a> {
         let opacity = inherited_opacity * f64::from(group.opacity().get());
         let mut previous_marker_promoted = false;
         for (index, node) in group.children().iter().enumerate() {
+            self.options.check_cancelled()?;
             if previous_marker_promoted && self.is_generated_marker_artwork(group.children(), index)
             {
                 previous_marker_promoted = false;

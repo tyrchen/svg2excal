@@ -35,8 +35,8 @@ mod target;
 pub use convert::{convert, convert_with_resources};
 pub use error::{ConversionError, InputRejection, LimitResource};
 pub use options::{
-    ConversionLimits, ConversionOptions, ConversionProfile, FontOptions, GeometryOptions,
-    ProvenanceMode, RasterOptions,
+    CancellationFlag, ConversionLimits, ConversionOptions, ConversionProfile, FontOptions,
+    GeometryOptions, ProvenanceMode, RasterOptions,
 };
 pub use report::{
     ConversionDiagnostic, ConversionReport, ConversionResult, DiagnosticCode, DiagnosticSeverity,

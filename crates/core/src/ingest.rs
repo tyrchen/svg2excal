@@ -77,6 +77,7 @@ pub(crate) fn normalize(
     options: &ConversionOptions,
     resources: Option<&ResourceContext<'_>>,
 ) -> Result<NormalizedInput, ConversionError> {
+    options.check_cancelled()?;
     if !options.is_valid() {
         return Err(ConversionError::InputRejected(
             InputRejection::InvalidOptions,
@@ -114,6 +115,12 @@ pub(crate) fn normalize(
         return Err(ConversionError::ResourceDenied { kind: "nested-svg" });
     }
     let prepared = prepare_source(text, &document, &options.limits)?;
+    if prepared.metadata.len() > options.limits.max_correlation_candidates() {
+        return Err(limit(
+            LimitResource::WorkUnits,
+            options.limits.max_correlation_candidates(),
+        ));
+    }
     let mut resource_budget = ResourceBudget {
         decoded_bytes: 0,
         xml_elements: census.elements,
@@ -138,7 +145,7 @@ pub(crate) fn normalize(
     let tree = usvg::Tree::from_xmltree(&instrumented, &usvg_options)
         .map_err(|error| sanitize_normalization_error(&error))?;
 
-    let paint_nodes = count_paint_nodes(tree.root(), options.limits.max_paint_nodes())?;
+    let paint_nodes = count_paint_nodes(tree.root(), options)?;
     let mut diagnostics = Vec::new();
     if census.active_content > 0 {
         diagnostics.push(ConversionDiagnostic::new(
@@ -237,10 +244,12 @@ fn census(
     let mut references = 0_usize;
     let mut active_content = 0_usize;
     let mut nested_svg_data_images = 0_usize;
+    let mut input_images = 0_usize;
     let mut external_references = Vec::new();
     let mut external_seen = BTreeSet::new();
 
     for node in document.descendants() {
+        options.check_cancelled()?;
         if node.is_element() {
             elements = elements
                 .checked_add(1)
@@ -276,6 +285,7 @@ fn census(
             if is_active_element(node.tag_name().name()) {
                 active_content = active_content.saturating_add(1);
             }
+            reserve_input_image(node, limits, &mut input_images)?;
             for attribute in node.attributes() {
                 let value = attribute.value();
                 validate_lexical_value(value, limits, &mut total_text_bytes)?;
@@ -327,6 +337,23 @@ fn census(
         external_references,
         nested_svg_data_images,
     })
+}
+
+fn reserve_input_image(
+    node: usvg::roxmltree::Node<'_, '_>,
+    limits: &crate::ConversionLimits,
+    input_images: &mut usize,
+) -> Result<(), ConversionError> {
+    if node.tag_name().name() != "image" {
+        return Ok(());
+    }
+    *input_images = input_images
+        .checked_add(1)
+        .ok_or_else(|| limit(LimitResource::Images, limits.max_input_images()))?;
+    if *input_images > limits.max_input_images() {
+        return Err(limit(LimitResource::Images, limits.max_input_images()));
+    }
+    Ok(())
 }
 
 fn census_text_node(
@@ -566,6 +593,7 @@ fn resolve_images(
     })?;
     let ProvidedResourcePolicy::RelativeFiles(policy) = &context.policy;
     for reference in references {
+        options.check_cancelled()?;
         let request = ResourceRequest::parse(reference, policy).map_err(|_| {
             ConversionError::ResourceDenied {
                 kind: "invalid-relative-path",
@@ -607,9 +635,11 @@ fn parse_nested_svg(
     depth: usize,
     budget: &mut ResourceBudget,
 ) -> Result<usvg::Tree, ConversionError> {
-    const MAX_NESTED_SVG_DEPTH: usize = 8;
-    if depth > MAX_NESTED_SVG_DEPTH {
-        return Err(limit(LimitResource::References, MAX_NESTED_SVG_DEPTH));
+    if depth > options.limits.max_nested_svg_depth() {
+        return Err(limit(
+            LimitResource::References,
+            options.limits.max_nested_svg_depth(),
+        ));
     }
     let text = std::str::from_utf8(bytes)
         .map_err(|_| ConversionError::InputRejected(InputRejection::InvalidUtf8))?;
@@ -679,6 +709,7 @@ fn prevalidate_data_images(
         .descendants()
         .filter(usvg::roxmltree::Node::is_element)
     {
+        options.check_cancelled()?;
         if node.tag_name().name() != "image" {
             continue;
         }
@@ -852,10 +883,15 @@ fn image_digest(bytes: &[u8]) -> String {
     blake3::hash(bytes).to_hex().to_string()
 }
 
-fn count_paint_nodes(group: &usvg::Group, limit_value: usize) -> Result<usize, ConversionError> {
+fn count_paint_nodes(
+    group: &usvg::Group,
+    options: &ConversionOptions,
+) -> Result<usize, ConversionError> {
+    let limit_value = options.limits.max_paint_nodes();
     let mut count = 1_usize;
     let mut stack = vec![group];
     while let Some(current) = stack.pop() {
+        options.check_cancelled()?;
         for node in current.children() {
             count = count
                 .checked_add(1)

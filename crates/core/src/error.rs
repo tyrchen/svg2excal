@@ -50,6 +50,8 @@ pub enum LimitResource {
     XmlText,
     /// Reference count or depth.
     References,
+    /// Input image elements.
+    Images,
     /// Normalized paint nodes.
     PaintNodes,
     /// Path segments.
@@ -78,6 +80,9 @@ impl std::fmt::Display for LimitResource {
 #[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum ConversionError {
+    /// A caller requested cooperative cancellation.
+    #[error("conversion cancelled")]
+    Cancelled,
     /// Input was rejected before XML normalization.
     #[error("input rejected: {0}")]
     InputRejected(InputRejection),
@@ -142,6 +147,7 @@ impl ConversionError {
     #[must_use]
     pub const fn code(&self) -> &'static str {
         match self {
+            Self::Cancelled => "cancelled",
             Self::InputRejected(_) => "input-rejected",
             Self::MalformedXml { .. } => "malformed-xml",
             Self::UnsupportedRoot => "unsupported-root",

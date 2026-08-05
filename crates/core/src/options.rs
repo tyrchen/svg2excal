@@ -1,8 +1,34 @@
 //! Validated conversion policy and resource-limit options.
 
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
 use typed_builder::TypedBuilder;
 
 use crate::{ConversionError, InputRejection};
+
+/// Cooperative cancellation signal for synchronous conversions.
+///
+/// Cancellation is checked between converter-owned stages and bounded work
+/// loops. Upstream normalization and raster calls are not preempted; callers
+/// needing hard termination must isolate conversions in worker processes.
+#[derive(Debug, Clone, Default)]
+pub struct CancellationFlag(Arc<AtomicBool>);
+
+impl CancellationFlag {
+    /// Requests cancellation of conversions using this flag.
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Release);
+    }
+
+    /// Returns whether cancellation has been requested.
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+}
 
 /// Policy used when the source cannot be represented exactly by native target elements.
 #[non_exhaustive]
@@ -47,6 +73,10 @@ pub struct ConversionLimits {
     max_total_text_bytes: usize,
     max_references: usize,
     max_reference_depth: usize,
+    max_correlation_candidates: usize,
+    max_input_images: usize,
+    max_custom_fonts: usize,
+    max_nested_svg_depth: usize,
     max_paint_nodes: usize,
     max_path_segments_per_path: usize,
     max_path_segments: usize,
@@ -78,6 +108,10 @@ impl Default for ConversionLimits {
             max_total_text_bytes: 32 * 1024 * 1024,
             max_references: 100_000,
             max_reference_depth: 32,
+            max_correlation_candidates: 1_000_000,
+            max_input_images: 1_024,
+            max_custom_fonts: 32,
+            max_nested_svg_depth: 8,
             max_paint_nodes: 250_000,
             max_path_segments_per_path: 100_000,
             max_path_segments: 1_000_000,
@@ -174,6 +208,30 @@ impl ConversionLimits {
     #[must_use]
     pub const fn max_reference_depth(&self) -> usize {
         self.max_reference_depth
+    }
+
+    /// Maximum source-to-paint correlation candidates.
+    #[must_use]
+    pub const fn max_correlation_candidates(&self) -> usize {
+        self.max_correlation_candidates
+    }
+
+    /// Maximum image elements across the admitted source graph.
+    #[must_use]
+    pub const fn max_input_images(&self) -> usize {
+        self.max_input_images
+    }
+
+    /// Maximum caller-provided custom fonts.
+    #[must_use]
+    pub const fn max_custom_fonts(&self) -> usize {
+        self.max_custom_fonts
+    }
+
+    /// Maximum nested SVG image depth.
+    #[must_use]
+    pub const fn max_nested_svg_depth(&self) -> usize {
+        self.max_nested_svg_depth
     }
 
     /// Maximum normalized paint-node count.
@@ -273,6 +331,10 @@ impl ConversionLimits {
             && self.max_total_text_bytes >= self.max_single_text_bytes
             && self.max_references > 0
             && self.max_reference_depth > 0
+            && self.max_correlation_candidates > 0
+            && self.max_input_images > 0
+            && self.max_custom_fonts > 0
+            && self.max_nested_svg_depth > 0
             && self.max_paint_nodes > 0
             && self.max_path_segments_per_path > 0
             && self.max_path_segments >= self.max_path_segments_per_path
@@ -383,6 +445,30 @@ impl ConversionLimitsBuilder {
         max_reference_depth,
         usize,
         "Sets the reference-depth cap."
+    );
+    limit_setter!(
+        max_correlation_candidates,
+        max_correlation_candidates,
+        usize,
+        "Sets the source-to-paint correlation-candidate cap."
+    );
+    limit_setter!(
+        max_input_images,
+        max_input_images,
+        usize,
+        "Sets the input-image count cap."
+    );
+    limit_setter!(
+        max_custom_fonts,
+        max_custom_fonts,
+        usize,
+        "Sets the custom-font count cap."
+    );
+    limit_setter!(
+        max_nested_svg_depth,
+        max_nested_svg_depth,
+        usize,
+        "Sets the nested-SVG depth cap."
     );
     limit_setter!(
         max_paint_nodes,
@@ -686,6 +772,8 @@ pub struct ConversionOptions {
     pub fonts: FontOptions,
     /// Optional compact provenance.
     pub provenance: ProvenanceMode,
+    /// Cooperative cancellation signal checked during converter-owned work.
+    pub cancellation: CancellationFlag,
 }
 
 impl Default for ConversionOptions {
@@ -700,5 +788,13 @@ impl ConversionOptions {
             && self.geometry.validate()
             && self.raster.validate()
             && self.fonts.validate()
+    }
+
+    pub(crate) fn check_cancelled(&self) -> Result<(), ConversionError> {
+        if self.cancellation.is_cancelled() {
+            Err(ConversionError::Cancelled)
+        } else {
+            Ok(())
+        }
     }
 }

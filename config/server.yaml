@@ -1,0 +1,4 @@
+bind: 127.0.0.1:3000
+maxBodyBytes: 16777216
+conversionTimeoutMs: 30000
+maxConcurrentConversions: 4

@@ -25,9 +25,26 @@ test-visual: characterize
 test-hostile:
 	@cargo test -p svg2excal-core --test hostile
 
-verify: build test test-fixtures test-hostile test-compat test-visual
+fuzz:
+	@for target in svg_preflight style_parser source_correlation geometry target_validator; do \
+		cargo +nightly fuzz run $$target fuzz/corpus/$$target fixtures -- \
+			-max_total_time=$${FUZZ_SECONDS:-30} -timeout=10 || exit 1; \
+	done
+
+fuzz-build:
+	@cargo +nightly fuzz build
+
+bench:
+	@cargo bench -p svg2excal-core --bench conversion
+
+bench-build:
+	@cargo bench -p svg2excal-core --bench conversion --no-run
+
+verify: build test test-fixtures test-hostile test-compat test-visual fuzz-build bench-build
 	@cargo +nightly fmt --all -- --check
 	@cargo clippy --workspace --all-targets --all-features -- -D warnings -W clippy::pedantic
+	@cargo audit
+	@cargo deny check
 
 check-agent-sync:
 	@cmp -s CLAUDE.md AGENTS.md || { \
@@ -55,4 +72,4 @@ release:
 update-submodule:
 	@git submodule update --init --recursive --remote
 
-.PHONY: build test characterize test-compat test-fixtures test-visual test-hostile verify check-agent-sync release update-submodule
+.PHONY: build test characterize test-compat test-fixtures test-visual test-hostile fuzz fuzz-build bench bench-build verify check-agent-sync release update-submodule

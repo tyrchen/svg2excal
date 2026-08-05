@@ -1,0 +1,50 @@
+[package]
+name = "svg2excal-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+svg2excal-core = { path = "../crates/core" }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "svg_preflight"
+path = "fuzz_targets/svg_preflight.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "style_parser"
+path = "fuzz_targets/style_parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "source_correlation"
+path = "fuzz_targets/source_correlation.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "geometry"
+path = "fuzz_targets/geometry.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "target_validator"
+path = "fuzz_targets/target_validator.rs"
+test = false
+doc = false
+bench = false

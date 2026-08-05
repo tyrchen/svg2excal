@@ -1,10 +1,8 @@
 [package]
 name = "svg2excal-core"
-description = """
-
-"""
+description = "Bounded deterministic SVG/SVGZ to editable Excalidraw conversion core"
 categories = ["development-tools"]
-keywords = []
+keywords = ["svg", "excalidraw", "diagram", "converter"]
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -30,8 +28,13 @@ typed-builder.workspace = true
 usvg.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 proptest.workspace = true
 rstest.workspace = true
+
+[[bench]]
+name = "conversion"
+harness = false
 
 [lints]
 workspace = true

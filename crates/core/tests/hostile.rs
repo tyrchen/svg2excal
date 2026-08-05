@@ -1,9 +1,13 @@
 //! Hostile-input boundary tests.
 
+use std::{fmt::Write as _, io::Write as _};
+
 use base64::Engine as _;
+use flate2::{Compression, write::GzEncoder};
+use rstest::rstest;
 use svg2excal_core::{
-    ConversionError, ConversionLimits, ConversionOptions, ExcalidrawDocument, InputRejection,
-    LimitResource, ProvenanceMode, RasterOptions, convert,
+    CancellationFlag, ConversionError, ConversionLimits, ConversionOptions, ExcalidrawDocument,
+    InputRejection, LimitResource, ProvenanceMode, RasterOptions, convert,
 };
 
 #[test]
@@ -12,6 +16,19 @@ fn test_should_reject_empty_input() {
     assert!(matches!(
         result,
         Err(ConversionError::InputRejected(InputRejection::Empty))
+    ));
+}
+
+#[test]
+fn test_should_honor_cancellation_before_conversion() {
+    let cancellation = CancellationFlag::default();
+    cancellation.cancel();
+    let options = ConversionOptions::builder()
+        .cancellation(cancellation)
+        .build();
+    assert!(matches!(
+        convert(b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>", &options),
+        Err(ConversionError::Cancelled)
     ));
 }
 
@@ -30,6 +47,373 @@ fn test_should_reject_input_one_byte_over_limit() -> Result<(), Box<dyn std::err
             limit: 8
         })
     ));
+    Ok(())
+}
+
+#[rstest]
+#[case(-1, true)]
+#[case(0, false)]
+#[case(1, false)]
+fn test_should_enforce_input_byte_limit_at_boundary(
+    #[case] delta: isize,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let input = b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>";
+    let input_len = isize::try_from(input.len())?;
+    let limit = usize::try_from(input_len.saturating_add(delta))?;
+    let limits = ConversionLimits::builder().max_input_bytes(limit).build()?;
+    let result = convert(input, &ConversionOptions::builder().limits(limits).build());
+    assert_eq!(
+        matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::InputBytes,
+                ..
+            })
+        ),
+        rejected
+    );
+    Ok(())
+}
+
+#[rstest]
+#[case(1, false)]
+#[case(2, false)]
+#[case(3, true)]
+fn test_should_enforce_xml_element_limit_at_boundary(
+    #[case] rectangles: usize,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut input = String::from(r#"<svg xmlns="http://www.w3.org/2000/svg">"#);
+    for _ in 0..rectangles {
+        input.push_str("<rect/>");
+    }
+    input.push_str("</svg>");
+    let limits = ConversionLimits::builder().max_xml_elements(3).build()?;
+    let result = convert(
+        input.as_bytes(),
+        &ConversionOptions::builder().limits(limits).build(),
+    );
+    assert_eq!(
+        matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::XmlElements,
+                limit: 3
+            })
+        ),
+        rejected
+    );
+    Ok(())
+}
+
+#[rstest]
+#[case(2, true)]
+#[case(3, false)]
+#[case(4, false)]
+fn test_should_enforce_xml_depth_limit_at_boundary(
+    #[case] limit: usize,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let input = br#"<svg xmlns="http://www.w3.org/2000/svg"><g><rect/></g></svg>"#;
+    let limits = ConversionLimits::builder().max_xml_depth(limit).build()?;
+    let result = convert(input, &ConversionOptions::builder().limits(limits).build());
+    assert_eq!(
+        matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::XmlDepth,
+                ..
+            })
+        ),
+        rejected
+    );
+    Ok(())
+}
+
+#[rstest]
+#[case(2, true)]
+#[case(3, false)]
+#[case(4, false)]
+fn test_should_enforce_per_element_attribute_limit_at_boundary(
+    #[case] limit: usize,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let input = br#"<svg xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="1"/></svg>"#;
+    let limits = ConversionLimits::builder()
+        .max_attributes_per_element(limit)
+        .build()?;
+    let result = convert(input, &ConversionOptions::builder().limits(limits).build());
+    assert_eq!(
+        matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::XmlAttributes,
+                ..
+            })
+        ),
+        rejected
+    );
+    Ok(())
+}
+
+#[rstest]
+#[case(2, true)]
+#[case(3, false)]
+#[case(4, false)]
+fn test_should_enforce_total_attribute_limit_at_boundary(
+    #[case] limit: usize,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let input = br#"<svg xmlns="http://www.w3.org/2000/svg"><rect x="1"/><rect y="1"/><rect width="1"/></svg>"#;
+    let limits = ConversionLimits::builder()
+        .max_attributes_per_element(1)
+        .max_total_attributes(limit)
+        .build()?;
+    let result = convert(input, &ConversionOptions::builder().limits(limits).build());
+    assert_eq!(
+        matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::XmlAttributes,
+                ..
+            })
+        ),
+        rejected
+    );
+    Ok(())
+}
+
+#[rstest]
+#[case("abc", false)]
+#[case("abcd", false)]
+#[case("abcde", true)]
+fn test_should_enforce_single_text_limit_at_boundary(
+    #[case] text: &str,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let input = format!(r#"<svg xmlns="http://www.w3.org/2000/svg"><text>{text}</text></svg>"#);
+    let limits = ConversionLimits::builder()
+        .max_single_text_bytes(4)
+        .build()?;
+    let result = convert(
+        input.as_bytes(),
+        &ConversionOptions::builder().limits(limits).build(),
+    );
+    assert_eq!(
+        matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::XmlText,
+                limit: 4
+            })
+        ),
+        rejected
+    );
+    Ok(())
+}
+
+#[rstest]
+#[case(2, true)]
+#[case(3, false)]
+#[case(4, false)]
+fn test_should_enforce_total_text_limit_at_boundary(
+    #[case] limit: usize,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let input = br#"<svg xmlns="http://www.w3.org/2000/svg"><text>a</text><text>b</text><text>c</text></svg>"#;
+    let limits = ConversionLimits::builder()
+        .max_single_text_bytes(1)
+        .max_total_text_bytes(limit)
+        .build()?;
+    let result = convert(input, &ConversionOptions::builder().limits(limits).build());
+    assert_eq!(
+        matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::XmlText,
+                ..
+            })
+        ),
+        rejected
+    );
+    Ok(())
+}
+
+#[rstest]
+#[case(-1, true)]
+#[case(0, false)]
+#[case(1, false)]
+fn test_should_enforce_decompressed_byte_limit_at_boundary(
+    #[case] delta: isize,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let input = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\"><!--{}--></svg>",
+        "x".repeat(1_000)
+    );
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
+    encoder.write_all(input.as_bytes())?;
+    let compressed = encoder.finish()?;
+    let limit = usize::try_from(isize::try_from(input.len())?.saturating_add(delta))?;
+    let limits = ConversionLimits::builder()
+        .max_input_bytes(compressed.len())
+        .max_decompressed_bytes(limit)
+        .max_svgz_expansion_ratio(100)
+        .build()?;
+    let result = convert(
+        &compressed,
+        &ConversionOptions::builder().limits(limits).build(),
+    );
+    assert_eq!(
+        matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::DecompressedBytes,
+                ..
+            })
+        ),
+        rejected
+    );
+    Ok(())
+}
+
+#[rstest]
+#[case(-1, true)]
+#[case(0, false)]
+#[case(1, false)]
+fn test_should_enforce_data_url_lexical_limit_at_boundary(
+    #[case] delta: isize,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let href = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+    let input = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg"><image width="1" height="1" href="{href}"/></svg>"#
+    );
+    let limit = usize::try_from(isize::try_from(href.len())?.saturating_add(delta))?;
+    let limits = ConversionLimits::builder()
+        .max_data_url_bytes(limit)
+        .build()?;
+    let result = convert(
+        input.as_bytes(),
+        &ConversionOptions::builder().limits(limits).build(),
+    );
+    if rejected {
+        assert!(matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::EmbeddedBytes,
+                ..
+            })
+        ));
+    } else {
+        assert!(
+            result.is_ok(),
+            "unexpected accepted-boundary result: {result:?}"
+        );
+    }
+    Ok(())
+}
+
+#[rstest]
+#[case(1, false)]
+#[case(2, false)]
+#[case(3, true)]
+fn test_should_enforce_reference_count_limit_at_boundary(
+    #[case] references: usize,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut input = String::from(
+        r#"<svg xmlns="http://www.w3.org/2000/svg"><defs><rect id="a" width="1" height="1"/></defs>"#,
+    );
+    for _ in 0..references {
+        input.push_str(r##"<use href="#a"/>"##);
+    }
+    input.push_str("</svg>");
+    let limits = ConversionLimits::builder().max_references(2).build()?;
+    let result = convert(
+        input.as_bytes(),
+        &ConversionOptions::builder().limits(limits).build(),
+    );
+    assert_eq!(
+        matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::References,
+                limit: 2
+            })
+        ),
+        rejected
+    );
+    Ok(())
+}
+
+#[rstest]
+#[case(1, false)]
+#[case(2, false)]
+#[case(3, true)]
+fn test_should_enforce_paint_node_limit_at_boundary(
+    #[case] rectangles: usize,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut input = String::from(r#"<svg xmlns="http://www.w3.org/2000/svg">"#);
+    for _ in 0..rectangles {
+        input.push_str("<rect width=\"1\" height=\"1\"/>");
+    }
+    input.push_str("</svg>");
+    let limits = ConversionLimits::builder().max_paint_nodes(3).build()?;
+    let result = convert(
+        input.as_bytes(),
+        &ConversionOptions::builder().limits(limits).build(),
+    );
+    assert_eq!(
+        matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::PaintNodes,
+                limit: 3
+            })
+        ),
+        rejected
+    );
+    Ok(())
+}
+
+#[rstest]
+#[case(1, false)]
+#[case(2, false)]
+#[case(3, true)]
+fn test_should_enforce_input_image_limit_at_boundary(
+    #[case] images: usize,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut input = String::from(r#"<svg xmlns="http://www.w3.org/2000/svg">"#);
+    for _ in 0..images {
+        input.push_str(r##"<image href="#missing" width="1" height="1"/>"##);
+    }
+    input.push_str("</svg>");
+    let limits = ConversionLimits::builder().max_input_images(2).build()?;
+    let result = convert(
+        input.as_bytes(),
+        &ConversionOptions::builder().limits(limits).build(),
+    );
+    if rejected {
+        assert!(matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::Images,
+                limit: 2
+            })
+        ));
+    } else {
+        assert!(!matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::Images,
+                ..
+            })
+        ));
+    }
     Ok(())
 }
 
@@ -182,6 +566,217 @@ fn test_should_enforce_local_reference_depth() -> Result<(), Box<dyn std::error:
             })
         ),
         "unexpected result: {conversion:?}"
+    );
+    Ok(())
+}
+
+#[rstest]
+#[case(2, true)]
+#[case(3, false)]
+#[case(4, false)]
+fn test_should_enforce_reference_depth_at_boundary(
+    #[case] limit: usize,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let limits = ConversionLimits::builder()
+        .max_reference_depth(limit)
+        .build()?;
+    let options = ConversionOptions::builder().limits(limits).build();
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">
+      <defs><g id="a"><use href="#b"/></g><g id="b"><use href="#c"/></g><g id="c"><rect width="1" height="1"/></g></defs>
+      <use href="#a"/>
+    </svg>"##;
+    let result = convert(input, &options);
+    assert_eq!(
+        matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::References,
+                ..
+            })
+        ),
+        rejected
+    );
+    Ok(())
+}
+
+#[rstest]
+#[case(1, true)]
+#[case(2, false)]
+#[case(3, false)]
+fn test_should_enforce_segments_per_path_at_boundary(
+    #[case] limit: usize,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let limits = ConversionLimits::builder()
+        .max_path_segments_per_path(limit)
+        .build()?;
+    let options = ConversionOptions::builder().limits(limits).build();
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 L10 10" fill="none" stroke="#000"/></svg>"##;
+    let result = convert(input, &options);
+    assert_eq!(
+        matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::PathSegments,
+                ..
+            })
+        ),
+        rejected
+    );
+    Ok(())
+}
+
+#[rstest]
+#[case(3, true)]
+#[case(4, false)]
+#[case(5, false)]
+fn test_should_enforce_total_path_segments_at_boundary(
+    #[case] limit: usize,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let limits = ConversionLimits::builder()
+        .max_path_segments_per_path(2)
+        .max_path_segments(limit)
+        .build()?;
+    let options = ConversionOptions::builder().limits(limits).build();
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 L10 10" fill="none" stroke="#000"/><path d="M10 0 L0 10" fill="none" stroke="#000"/></svg>"##;
+    let result = convert(input, &options);
+    assert_eq!(
+        matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::PathSegments,
+                ..
+            })
+        ),
+        rejected
+    );
+    Ok(())
+}
+
+#[rstest]
+#[case(1, true)]
+#[case(2, false)]
+#[case(3, false)]
+fn test_should_enforce_target_point_limit_at_boundary(
+    #[case] limit: usize,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let limits = ConversionLimits::builder()
+        .max_target_points(limit)
+        .build()?;
+    let options = ConversionOptions::builder().limits(limits).build();
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 L10 10" fill="none" stroke="#000"/></svg>"##;
+    let result = convert(input, &options);
+    assert_eq!(
+        matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::TargetPoints,
+                ..
+            })
+        ),
+        rejected
+    );
+    Ok(())
+}
+
+#[rstest]
+#[case(1, false)]
+#[case(2, false)]
+#[case(3, true)]
+fn test_should_enforce_target_element_limit_at_boundary(
+    #[case] rectangles: usize,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut input = String::from(r#"<svg xmlns="http://www.w3.org/2000/svg">"#);
+    for index in 0..rectangles {
+        if write!(
+            &mut input,
+            r#"<rect x="{index}" width="1" height="1" fill="red"/>"#
+        )
+        .is_err()
+        {
+            return Err(std::io::Error::other("test input construction failed").into());
+        }
+    }
+    input.push_str("</svg>");
+    let limits = ConversionLimits::builder()
+        .max_target_elements(2)
+        .max_decomposition_elements(2)
+        .build()?;
+    let result = convert(
+        input.as_bytes(),
+        &ConversionOptions::builder().limits(limits).build(),
+    );
+    assert_eq!(
+        matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::TargetElements,
+                limit: 2
+            })
+        ),
+        rejected
+    );
+    Ok(())
+}
+
+#[rstest]
+#[case(-1, true)]
+#[case(0, false)]
+#[case(1, false)]
+fn test_should_enforce_embedded_output_limit_at_boundary(
+    #[case] delta: isize,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><defs><linearGradient id="g"><stop stop-color="#f00"/><stop offset="1" stop-color="#00f"/></linearGradient></defs><rect width="20" height="20" fill="url(#g)"/></svg>"##;
+    let baseline = convert(input, &ConversionOptions::default())?;
+    let limit =
+        usize::try_from(isize::try_from(baseline.report.embedded_bytes)?.saturating_add(delta))?;
+    let limits = ConversionLimits::builder()
+        .max_embedded_output_bytes(limit)
+        .build()?;
+    let result = convert(input, &ConversionOptions::builder().limits(limits).build());
+    assert_eq!(
+        matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::EmbeddedBytes,
+                ..
+            })
+        ),
+        rejected
+    );
+    Ok(())
+}
+
+#[rstest]
+#[case(-1, true)]
+#[case(0, false)]
+#[case(1, false)]
+fn test_should_enforce_serialized_json_limit_at_boundary(
+    #[case] delta: isize,
+    #[case] rejected: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let input = br#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>"#;
+    let baseline = convert(input, &ConversionOptions::default())?;
+    let serialized = baseline.document.to_pretty_json()?;
+    let limit = usize::try_from(isize::try_from(serialized.len())?.saturating_add(delta))?;
+    let limits = ConversionLimits::builder()
+        .max_serialized_json_bytes(limit)
+        .build()?;
+    let result = convert(input, &ConversionOptions::builder().limits(limits).build());
+    assert_eq!(
+        matches!(
+            result,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::SerializedJson,
+                ..
+            })
+        ),
+        rejected
     );
     Ok(())
 }

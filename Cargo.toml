@@ -15,15 +15,14 @@ readme = "README.md"
 
 [workspace.dependencies]
 anyhow = "1.0.104"
-axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio", "tracing"] }
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "query", "tokio", "tracing"] }
 base64 = "0.23.1"
 blake3 = "1.8.5"
-bytes = { version = "1.12.1", features = ["serde"] }
-clap = { version = "4.6.5", features = ["derive"] }
+clap = { version = "=4.6.1", features = ["derive"] }
 config = { version = "0.15.25", default-features = false, features = ["yaml"] }
+criterion = "0.8.2"
 data-url = "0.3.2"
 flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
-http = "1.5.0"
 http-body-util = "0.1.4"
 imagesize = "0.15.0"
 proptest = "1.11.0"
@@ -42,7 +41,6 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }
 typed-builder = "0.23.2"
 usvg = { version = "0.48.1", default-features = false, features = ["text"] }
-validator = { version = "0.21.0", features = ["derive"] }
 
 # workspace crates
 svg2excal-core = { path = "crates/core", version = "0.1.0" }

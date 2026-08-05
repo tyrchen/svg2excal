@@ -1,5 +1,9 @@
 # Documentation Index
 
+## User and operator guides
+
+- [Operations and verification](./svg2excal-operations.md) — CLI/server contracts, resource policy, privacy, fuzzing, benchmarks, and failure interpretation.
+
 ## Research
 
 - [Research index](./research/README.md) — area map and upstream-reference inventory.

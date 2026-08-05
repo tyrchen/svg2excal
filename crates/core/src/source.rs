@@ -35,6 +35,10 @@ pub(crate) struct SourceMetadata {
 }
 
 impl SourceMetadata {
+    pub(crate) fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
     pub(crate) fn node(&self, id: &str) -> Option<&SourceNodeMetadata> {
         self.nodes.get(id)
     }
