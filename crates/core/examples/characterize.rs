@@ -1,9 +1,9 @@
 //! Reproducible Phase 0 characterization for the canonical architecture fixture.
 
-use std::collections::BTreeMap;
-use std::error::Error;
-use std::fs;
-use std::path::Path;
+// This synchronous developer probe intentionally uses blocking filesystem I/O.
+#![allow(clippy::disallowed_methods)]
+
+use std::{collections::BTreeMap, error::Error, fs, path::Path};
 
 use serde::Serialize;
 use usvg::tiny_skia_path::PathSegment;
@@ -58,7 +58,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut source_elements = BTreeMap::new();
     let mut source_max_depth = 0_usize;
-    for node in document.descendants().filter(usvg::roxmltree::Node::is_element) {
+    for node in document
+        .descendants()
+        .filter(usvg::roxmltree::Node::is_element)
+    {
         *source_elements
             .entry(node.tag_name().name().to_owned())
             .or_default() += 1;
@@ -95,9 +98,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn deterministic_options() -> usvg::Options<'static> {
-    let mut options = usvg::Options::default();
-    options.resources_dir = None;
-    options.font_family = "Liberation Sans".to_owned();
+    let mut options = usvg::Options {
+        resources_dir: None,
+        font_family: "Liberation Sans".to_owned(),
+        ..Default::default()
+    };
     let fontdb = options.fontdb_mut();
     fontdb.load_font_data(LIBERATION_SANS.to_vec());
     fontdb.set_serif_family("Liberation Sans");
@@ -179,14 +184,30 @@ fn css_conflict_probe() -> Result<String, Box<dyn Error>> {
 }
 
 fn render_baseline(tree: &usvg::Tree, scale: u32, output: &str) -> Result<(), Box<dyn Error>> {
-    let width = tree.size().width().ceil() as u32;
-    let height = tree.size().height().ceil() as u32;
+    let width = bounded_extent_to_u32(tree.size().width())?;
+    let height = bounded_extent_to_u32(tree.size().height())?;
     let scaled_width = width.checked_mul(scale).ok_or("baseline width overflow")?;
-    let scaled_height = height.checked_mul(scale).ok_or("baseline height overflow")?;
+    let scaled_height = height
+        .checked_mul(scale)
+        .ok_or("baseline height overflow")?;
     let mut pixmap = resvg::tiny_skia::Pixmap::new(scaled_width, scaled_height)
         .ok_or("baseline pixmap dimensions are invalid")?;
-    let transform = resvg::tiny_skia::Transform::from_scale(scale as f32, scale as f32);
+    let render_scale = match scale {
+        1 => 1.0,
+        2 => 2.0,
+        _ => return Err("baseline scale must be one or two".into()),
+    };
+    let transform = resvg::tiny_skia::Transform::from_scale(render_scale, render_scale);
     resvg::render(tree, transform, &mut pixmap.as_mut());
     pixmap.save_png(output)?;
     Ok(())
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn bounded_extent_to_u32(value: f32) -> Result<u32, Box<dyn Error>> {
+    let rounded = value.ceil();
+    if !rounded.is_finite() || rounded <= 0.0 || f64::from(rounded) > f64::from(u32::MAX) {
+        return Err("baseline extent is outside the PNG range".into());
+    }
+    Ok(rounded as u32)
 }

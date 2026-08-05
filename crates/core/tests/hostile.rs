@@ -1,0 +1,279 @@
+//! Hostile-input boundary tests.
+
+use base64::Engine as _;
+use svg2excal_core::{
+    ConversionError, ConversionLimits, ConversionOptions, ExcalidrawDocument, InputRejection,
+    LimitResource, ProvenanceMode, convert,
+};
+
+#[test]
+fn test_should_reject_empty_input() {
+    let result = convert(&[], &ConversionOptions::default());
+    assert!(matches!(
+        result,
+        Err(ConversionError::InputRejected(InputRejection::Empty))
+    ));
+}
+
+#[test]
+fn test_should_reject_input_one_byte_over_limit() -> Result<(), Box<dyn std::error::Error>> {
+    let limits = ConversionLimits::builder()
+        .max_input_bytes(8)
+        .max_decompressed_bytes(8)
+        .build()?;
+    let options = ConversionOptions::builder().limits(limits).build();
+    let result = convert(b"123456789", &options);
+    assert!(matches!(
+        result,
+        Err(ConversionError::LimitExceeded {
+            resource: LimitResource::InputBytes,
+            limit: 8
+        })
+    ));
+    Ok(())
+}
+
+#[test]
+fn test_should_reject_illegal_xml_control_character() {
+    let input = b"<svg xmlns=\"http://www.w3.org/2000/svg\">\0</svg>";
+    let result = convert(input, &ConversionOptions::default());
+    assert!(matches!(
+        result,
+        Err(ConversionError::InputRejected(
+            InputRejection::IllegalControlCharacter
+        ))
+    ));
+}
+
+#[test]
+fn test_should_sanitize_malformed_xml_error() {
+    let input = br#"<svg xmlns="http://www.w3.org/2000/svg"><path secret="credential">"#;
+    let result = convert(input, &ConversionOptions::default());
+    let rendered = format!("{result:?}");
+    assert!(!rendered.contains("credential"));
+    assert!(matches!(result, Err(ConversionError::MalformedXml { .. })));
+}
+
+#[test]
+fn test_should_reject_invalid_limit_relationships_at_build_time() {
+    let result = ConversionLimits::builder().max_xml_elements(0).build();
+    assert!(matches!(
+        result,
+        Err(ConversionError::InputRejected(
+            InputRejection::InvalidOptions
+        ))
+    ));
+}
+
+#[test]
+fn test_should_enforce_selected_json_limit_during_conversion()
+-> Result<(), Box<dyn std::error::Error>> {
+    let limits = ConversionLimits::builder()
+        .max_serialized_json_bytes(64)
+        .build()?;
+    let options = ConversionOptions::builder().limits(limits).build();
+    let input = br#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>"#;
+    assert!(matches!(
+        convert(input, &options),
+        Err(ConversionError::LimitExceeded {
+            resource: LimitResource::SerializedJson,
+            limit: 64
+        })
+    ));
+    Ok(())
+}
+
+#[test]
+fn test_should_deny_external_urls_in_stylesheet_text() {
+    let input = br#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">
+      <style>rect { fill: url(relative.png); }</style><rect width="10" height="10"/>
+    </svg>"#;
+    assert!(matches!(
+        convert(input, &ConversionOptions::default()),
+        Err(ConversionError::ResourceDenied { .. })
+    ));
+}
+
+#[test]
+fn test_should_deny_external_stylesheet_import() {
+    let input = br#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">
+      <style>@import "theme.css"; rect { fill: red; }</style><rect width="10" height="10"/>
+    </svg>"#;
+    assert!(matches!(
+        convert(input, &ConversionOptions::default()),
+        Err(ConversionError::ResourceDenied { .. })
+    ));
+}
+
+#[test]
+fn test_should_not_treat_hyperlink_as_rendering_resource() {
+    let input = br#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">
+      <a href="https://example.invalid"><rect width="10" height="10"/></a>
+    </svg>"#;
+    assert!(convert(input, &ConversionOptions::default()).is_ok());
+}
+
+#[test]
+fn test_should_enforce_local_reference_depth() -> Result<(), Box<dyn std::error::Error>> {
+    let limits = ConversionLimits::builder().max_reference_depth(2).build()?;
+    let options = ConversionOptions::builder().limits(limits).build();
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">
+      <defs><g id="a"><use href="#b"/></g><g id="b"><use href="#c"/></g><g id="c"><rect width="1" height="1"/></g></defs>
+      <use href="#a"/>
+    </svg>"##;
+    let conversion = convert(input, &options);
+    assert!(
+        matches!(
+            conversion,
+            Err(ConversionError::LimitExceeded {
+                resource: LimitResource::References,
+                limit: 2
+            })
+        ),
+        "unexpected result: {conversion:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn test_should_reject_invalid_element_version_on_import() -> Result<(), Box<dyn std::error::Error>>
+{
+    let input = br#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>"#;
+    let result = convert(input, &ConversionOptions::default())?;
+    let mut value: serde_json::Value = serde_json::from_str(&result.document.to_pretty_json()?)?;
+    let version = value
+        .pointer_mut("/elements/0/version")
+        .ok_or_else(|| std::io::Error::other("missing element version"))?;
+    *version = serde_json::Value::from(2);
+    let bytes = serde_json::to_vec(&value)?;
+    assert!(matches!(
+        ExcalidrawDocument::from_json(&bytes, &ConversionLimits::default()),
+        Err(ConversionError::InvalidGeneratedDocument { .. })
+    ));
+    Ok(())
+}
+
+#[test]
+fn test_should_reject_line_bindings_on_import() -> Result<(), Box<dyn std::error::Error>> {
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><line x1="1" y1="1" x2="19" y2="19" stroke="#000"/></svg>"##;
+    let result = convert(input, &ConversionOptions::default())?;
+    let mut value: serde_json::Value = serde_json::from_str(&result.document.to_pretty_json()?)?;
+    let snapshot = value.to_string();
+    let binding = value
+        .pointer_mut("/elements/0/startBinding")
+        .ok_or_else(|| std::io::Error::other(format!("missing binding field: {snapshot}")))?;
+    *binding = serde_json::json!({
+        "elementId": "bound-id",
+        "focus": 0,
+        "gap": 0,
+        "fixedPoint": null
+    });
+    let bytes = serde_json::to_vec(&value)?;
+    assert!(matches!(
+        ExcalidrawDocument::from_json(&bytes, &ConversionLimits::default()),
+        Err(ConversionError::InvalidGeneratedDocument { .. })
+    ));
+    Ok(())
+}
+
+#[test]
+fn test_should_reject_singleton_group_on_import() -> Result<(), Box<dyn std::error::Error>> {
+    let input = br#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>"#;
+    let result = convert(input, &ConversionOptions::default())?;
+    let mut value: serde_json::Value = serde_json::from_str(&result.document.to_pretty_json()?)?;
+    let groups = value
+        .pointer_mut("/elements/0/groupIds")
+        .ok_or_else(|| std::io::Error::other("missing group field"))?;
+    *groups = serde_json::json!(["one-member"]);
+    let bytes = serde_json::to_vec(&value)?;
+    assert!(matches!(
+        ExcalidrawDocument::from_json(&bytes, &ConversionLimits::default()),
+        Err(ConversionError::InvalidGeneratedDocument { .. })
+    ));
+    Ok(())
+}
+
+#[test]
+fn test_should_reject_linear_bounds_mismatch_on_import() -> Result<(), Box<dyn std::error::Error>> {
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><line x1="1" y1="1" x2="19" y2="19" stroke="#000"/></svg>"##;
+    let result = convert(input, &ConversionOptions::default())?;
+    let mut value: serde_json::Value = serde_json::from_str(&result.document.to_pretty_json()?)?;
+    let width = value
+        .pointer_mut("/elements/0/width")
+        .ok_or_else(|| std::io::Error::other("missing width"))?;
+    *width = serde_json::Value::from(17.0);
+    assert_invalid_document(&value)
+}
+
+#[test]
+fn test_should_reject_invalid_app_state_on_import() -> Result<(), Box<dyn std::error::Error>> {
+    let input = br#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>"#;
+    let result = convert(input, &ConversionOptions::default())?;
+    let mut value: serde_json::Value = serde_json::from_str(&result.document.to_pretty_json()?)?;
+    let grid = value
+        .pointer_mut("/appState/gridModeEnabled")
+        .ok_or_else(|| std::io::Error::other("missing grid setting"))?;
+    *grid = serde_json::Value::Bool(true);
+    assert_invalid_document(&value)
+}
+
+#[test]
+fn test_should_reject_malformed_provenance_on_import() -> Result<(), Box<dyn std::error::Error>> {
+    let input = br#"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>"#;
+    let options = ConversionOptions::builder()
+        .provenance(ProvenanceMode::Compact)
+        .build();
+    let result = convert(input, &options)?;
+    let mut value: serde_json::Value = serde_json::from_str(&result.document.to_pretty_json()?)?;
+    let source_key = value
+        .pointer_mut("/elements/0/customData/svg2excal/sourceKey")
+        .ok_or_else(|| std::io::Error::other("missing provenance"))?;
+    *source_key = serde_json::Value::from("../../private");
+    assert_invalid_document(&value)
+}
+
+#[test]
+fn test_should_reject_non_content_addressed_png_on_import() -> Result<(), Box<dyn std::error::Error>>
+{
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30">
+      <defs><linearGradient id="g"><stop stop-color="#f00"/><stop offset="1" stop-color="#00f"/></linearGradient></defs>
+      <rect width="30" height="30" fill="url(#g)"/>
+    </svg>"##;
+    let result = convert(input, &ConversionOptions::default())?;
+    let mut value: serde_json::Value = serde_json::from_str(&result.document.to_pretty_json()?)?;
+    let files = value
+        .get_mut("files")
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| std::io::Error::other("missing files"))?;
+    let file = files
+        .values_mut()
+        .next()
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| std::io::Error::other("missing file"))?;
+    let data_url = file
+        .get("dataUrl")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| std::io::Error::other("missing data URL"))?;
+    let encoded = data_url
+        .strip_prefix("data:image/png;base64,")
+        .ok_or_else(|| std::io::Error::other("bad data URL"))?;
+    let mut bytes = base64::engine::general_purpose::STANDARD.decode(encoded)?;
+    bytes.push(0);
+    file.insert(
+        "dataUrl".to_owned(),
+        serde_json::Value::from(format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )),
+    );
+    assert_invalid_document(&value)
+}
+
+fn assert_invalid_document(value: &serde_json::Value) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = serde_json::to_vec(value)?;
+    assert!(matches!(
+        ExcalidrawDocument::from_json(&bytes, &ConversionLimits::default()),
+        Err(ConversionError::InvalidGeneratedDocument { .. })
+    ));
+    Ok(())
+}

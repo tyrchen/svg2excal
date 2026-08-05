@@ -9,6 +9,7 @@ characterize:
 
 test-compat:
 	@test -d vendors/excalidraw/node_modules || corepack yarn --cwd vendors/excalidraw install --frozen-lockfile --ignore-scripts
+	@cargo run -p svg2excal-core --example emit_compat
 	@vendors/excalidraw/node_modules/.bin/vitest --config compat/vitest.config.mts run compat/excalidraw-compat.test.ts
 
 test-fixtures:

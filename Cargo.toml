@@ -41,12 +41,12 @@ usvg = { version = "0.48.1", default-features = false, features = ["text"] }
 validator = { version = "0.21.0", features = ["derive"] }
 
 # workspace crates
-svg2excal-core = { path = "crates/core" }
+svg2excal-core = { path = "crates/core", version = "0.1.0" }
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"
 missing_docs = "warn"
-rust_2024_compatibility = "warn"
+rust_2024_compatibility = { level = "warn", priority = -1 }
 unsafe_code = "forbid"
 
 [workspace.lints.clippy]
