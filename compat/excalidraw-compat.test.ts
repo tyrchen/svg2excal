@@ -43,6 +43,14 @@ describe("svg2excal target profile", () => {
         polygon: false,
       });
       expect(line?.points.at(0)).toEqual(line?.points.at(-1));
+      const arrow = restored.find((element) => element.type === "arrow");
+      expect(arrow).toMatchObject({
+        startBinding: null,
+        endBinding: null,
+        startArrowhead: null,
+        endArrowhead: "triangle",
+        elbowed: false,
+      });
       expect(restored.some((element) => element.type === "image")).toBe(true);
       expect(Object.keys(fixture.files)).toHaveLength(1);
       expect(

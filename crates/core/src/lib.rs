@@ -29,6 +29,7 @@ mod ingest;
 mod options;
 mod report;
 mod resource;
+mod source;
 mod target;
 
 pub use convert::{convert, convert_with_resources};

@@ -1,23 +1,30 @@
 //! Conversion orchestration and native/fallback lowering.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::OnceLock,
+};
 
 use base64::Engine as _;
-use usvg::tiny_skia_path::{PathSegment, Point as SkiaPoint, Transform};
+use usvg::{
+    filter::{Input as FilterInput, Kind as FilterKind},
+    tiny_skia_path::{PathSegment, Point as SkiaPoint, Transform},
+};
 
 use crate::{
     ConversionOptions, ConversionProfile, ProvenanceMode,
     error::{ConversionError, LimitResource},
-    identity::{element_identity, file_id},
+    identity::{element_identity, file_id, group_id},
     ingest::{NormalizedInput, normalize},
     report::{
         ConversionDiagnostic, ConversionReport, ConversionResult, DiagnosticCode,
         DiagnosticSeverity, sort_diagnostics,
     },
     resource::ResourceContext,
+    source::{SourceMetadata, SourceNodeMetadata},
     target::{
         BinaryFile, ElementBase, ElementStyle, ExcalidrawColor, ExcalidrawDocument,
-        ExcalidrawElement, FileId, Finite, LocalPoint, StrokeStyle, TextAlign,
+        ExcalidrawElement, FileId, Finite, GroupId, LocalPoint, StrokeStyle, TextAlign,
     },
 };
 
@@ -57,6 +64,15 @@ fn convert_internal(
     let scene_scale = scene_scale(&normalized, options)?;
     let mut context = LoweringContext::new(options, &normalized, scene_scale);
     context.lower_group(normalized.tree.root(), 1.0)?;
+    context.finalize_groups()?;
+    if context.arrow_count > 0 {
+        context.diagnostics.push(ConversionDiagnostic::new(
+            DiagnosticCode::BindingNotInferred,
+            DiagnosticSeverity::Info,
+            0,
+            "SVG connectors retain explicit null bindings because proximity is not topology",
+        ));
+    }
     sort_diagnostics(&mut context.diagnostics);
 
     if options.profile == ConversionProfile::Strict
@@ -146,14 +162,29 @@ enum PaintRole {
     Stroke,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct GroupKey {
+    source_order: u32,
+    instance: u32,
+}
+
 struct LoweringContext<'a> {
     options: &'a ConversionOptions,
     digest: &'a blake3::Hash,
+    source: &'a SourceMetadata,
     elements: Vec<ExcalidrawElement>,
     element_ids: BTreeSet<String>,
+    element_groups: Vec<Vec<GroupKey>>,
+    active_groups: Vec<GroupKey>,
+    active_instances: Vec<u32>,
+    next_instance: u32,
+    reported_marker_ids: BTreeSet<String>,
     files: BTreeMap<FileId, BinaryFile>,
     diagnostics: Vec<ConversionDiagnostic>,
     source_order: u32,
+    paint_order: u32,
+    current_source_tag: String,
+    arrow_count: usize,
     total_path_segments: usize,
     target_points: usize,
     fallback_pixels: u64,
@@ -179,11 +210,20 @@ impl<'a> LoweringContext<'a> {
         Self {
             options,
             digest: &normalized.digest,
+            source: &normalized.source,
             elements: Vec::with_capacity(normalized.paint_nodes.min(4096)),
             element_ids: BTreeSet::new(),
+            element_groups: Vec::with_capacity(normalized.paint_nodes.min(4096)),
+            active_groups: Vec::new(),
+            active_instances: Vec::new(),
+            next_instance: 0,
+            reported_marker_ids: BTreeSet::new(),
             files: BTreeMap::new(),
             diagnostics,
             source_order: 0,
+            paint_order: 0,
+            current_source_tag: "svg".to_owned(),
+            arrow_count: 0,
             total_path_segments: 0,
             target_points: 0,
             fallback_pixels: 0,
@@ -197,22 +237,64 @@ impl<'a> LoweringContext<'a> {
         group: &usvg::Group,
         inherited_opacity: f64,
     ) -> Result<(), ConversionError> {
-        let opacity = inherited_opacity * f64::from(group.opacity().get());
-        for node in group.children() {
-            self.source_order =
-                self.source_order
+        let group_metadata = self
+            .source
+            .node(group.id())
+            .filter(|metadata| metadata.explicit_group)
+            .cloned();
+        let entered_instance = group_metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.tag == "use");
+        if entered_instance {
+            self.next_instance =
+                self.next_instance
                     .checked_add(1)
                     .ok_or(ConversionError::LimitExceeded {
                         resource: LimitResource::WorkUnits,
                         limit: u64::from(u32::MAX),
                     })?;
+            self.active_instances.push(self.next_instance);
+        }
+        let group_anchor = group_metadata.map(|metadata| GroupKey {
+            source_order: metadata.order,
+            instance: self.active_instances.last().copied().unwrap_or(0),
+        });
+        if let Some(anchor) = group_anchor {
+            self.active_groups.push(anchor);
+        }
+        let opacity = inherited_opacity * f64::from(group.opacity().get());
+        let mut previous_marker_promoted = false;
+        for (index, node) in group.children().iter().enumerate() {
+            if previous_marker_promoted && self.is_generated_marker_artwork(group.children(), index)
+            {
+                previous_marker_promoted = false;
+                continue;
+            }
+            previous_marker_promoted = false;
+            self.select_source(node)?;
             match node {
                 usvg::Node::Group(child) if child.should_isolate() => {
-                    self.fallback_or_violation(node, "isolated SVG compositing group", None)?;
+                    if self.can_omit_drop_shadow(child) {
+                        self.diagnostics.push(ConversionDiagnostic::new(
+                            DiagnosticCode::FilterOmitted,
+                            DiagnosticSeverity::Omission,
+                            self.source_order,
+                            "a bounded cosmetic drop shadow was omitted while preserving source \
+                             graphics",
+                        ));
+                        self.lower_group(child, opacity)?;
+                    } else {
+                        self.fallback_or_violation(node, "isolated SVG compositing group", None)?;
+                    }
                 }
                 usvg::Node::Group(child) => self.lower_group(child, opacity)?,
                 usvg::Node::Path(path) if path.is_visible() => {
-                    self.lower_path(node, path, opacity)?;
+                    previous_marker_promoted = self.lower_path(
+                        node,
+                        path,
+                        opacity,
+                        self.marker_promotion_allowed(group.children(), index, path),
+                    )?;
                 }
                 usvg::Node::Path(_) => {}
                 usvg::Node::Text(text) => self.lower_text(node, text, opacity)?,
@@ -221,7 +303,118 @@ impl<'a> LoweringContext<'a> {
                 }
             }
         }
+        if group_anchor.is_some() {
+            self.active_groups.pop();
+        }
+        if entered_instance {
+            self.active_instances.pop();
+        }
         Ok(())
+    }
+
+    fn select_source(&mut self, node: &usvg::Node) -> Result<(), ConversionError> {
+        self.paint_order =
+            self.paint_order
+                .checked_add(1)
+                .ok_or(ConversionError::LimitExceeded {
+                    resource: LimitResource::WorkUnits,
+                    limit: u64::from(u32::MAX),
+                })?;
+        if let Some(metadata) = self.source.node(node.id()) {
+            self.source_order = metadata.order;
+            self.current_source_tag.clone_from(&metadata.tag);
+        } else {
+            self.source_order = self.paint_order;
+            match node {
+                usvg::Node::Group(_) => "g",
+                usvg::Node::Path(_) => "path",
+                usvg::Node::Image(_) => "image",
+                usvg::Node::Text(_) => "text",
+            }
+            .clone_into(&mut self.current_source_tag);
+        }
+        Ok(())
+    }
+
+    fn is_generated_marker_artwork(&self, children: &[usvg::Node], index: usize) -> bool {
+        let Some(usvg::Node::Group(group)) = children.get(index) else {
+            return false;
+        };
+        if !group.id().is_empty() {
+            return false;
+        }
+        index
+            .checked_sub(1)
+            .and_then(|previous| children.get(previous))
+            .is_some_and(|node| self.source.has_marker(node.id()))
+    }
+
+    fn marker_promotion_allowed(
+        &self,
+        children: &[usvg::Node],
+        index: usize,
+        path: &usvg::Path,
+    ) -> bool {
+        let Some(metadata) = children
+            .get(index)
+            .and_then(|node| self.source.node(node.id()))
+            .filter(|metadata| metadata.marker_declared && metadata.marker_fully_recognized)
+        else {
+            return false;
+        };
+        let Some(usvg::Node::Group(artwork)) = children.get(index.saturating_add(1)) else {
+            return false;
+        };
+        artwork.id().is_empty() && marker_artwork_matches(artwork, path, metadata)
+    }
+
+    fn can_omit_drop_shadow(&self, group: &usvg::Group) -> bool {
+        if (group.opacity().get() - 1.0).abs() > f32::EPSILON
+            || group.blend_mode() != usvg::BlendMode::Normal
+            || group.isolate()
+            || group.clip_path().is_some()
+            || group.mask().is_some()
+            || group.filters().len() != 1
+        {
+            return false;
+        }
+        let Some(shadow) = self
+            .source
+            .node(group.id())
+            .and_then(|metadata| metadata.drop_shadow)
+        else {
+            return false;
+        };
+        let Some(filter) = group.filters().first() else {
+            return false;
+        };
+        let Some(primitive) = filter.primitives().first() else {
+            return false;
+        };
+        if filter.primitives().len() != 1 {
+            return false;
+        }
+        let FilterKind::DropShadow(resolved) = primitive.kind() else {
+            return false;
+        };
+        if resolved.input() != &FilterInput::SourceGraphic {
+            return false;
+        }
+        let resolved_balanced = resolved.opacity().get() <= 0.15
+            && resolved.std_dev_x().get() <= 4.0
+            && resolved.std_dev_y().get() <= 4.0
+            && resolved.dx().abs() <= 4.0
+            && resolved.dy().abs() <= 4.0;
+        let resolved_editable = resolved.opacity().get() <= 0.25
+            && resolved.std_dev_x().get() <= 8.0
+            && resolved.std_dev_y().get() <= 8.0
+            && resolved.dx().abs() <= 8.0
+            && resolved.dy().abs() <= 8.0;
+        match self.options.profile {
+            ConversionProfile::Balanced => shadow.balanced_omittable && resolved_balanced,
+            ConversionProfile::Editable => shadow.editable_omittable && resolved_editable,
+            ConversionProfile::Fidelity | ConversionProfile::Strict => false,
+        }
     }
 
     fn lower_path(
@@ -229,16 +422,119 @@ impl<'a> LoweringContext<'a> {
         node: &usvg::Node,
         path: &usvg::Path,
         opacity: f64,
-    ) -> Result<(), ConversionError> {
+        marker_promotion_allowed: bool,
+    ) -> Result<bool, ConversionError> {
+        let source_metadata = self.source.node(node.id()).cloned();
+        if self.path_preflight(node, path, source_metadata.as_ref())? {
+            return Ok(false);
+        }
+
+        if let Some(metadata) = source_metadata.as_ref()
+            && metadata.tag == "rect"
+            && metadata.rect_radius.is_some()
+            && self.lower_correlated_rectangle(node, path, opacity, metadata)?
+        {
+            return Ok(false);
+        }
+
+        if looks_like_axis_aligned_ellipse(path) {
+            self.lower_ellipse(path, opacity)?;
+            return Ok(false);
+        }
+        let has_curves = path
+            .data()
+            .segments()
+            .any(|segment| matches!(segment, PathSegment::QuadTo(..) | PathSegment::CubicTo(..)));
+        if has_curves
+            && matches!(
+                self.options.profile,
+                ConversionProfile::Fidelity | ConversionProfile::Strict
+            )
+        {
+            self.fallback_or_violation(node, "curved path", Some(DiagnosticCode::PathFlattened))?;
+            return Ok(false);
+        }
+
+        let subpaths = flatten_path(
+            path,
+            self.options.geometry.curve_tolerance_px(),
+            self.scene_scale,
+            self.options.limits.max_target_points(),
+        )?;
+        if subpaths.is_empty() {
+            return Ok(false);
+        }
+        if subpaths.len() > 1 && path.fill().is_some() {
+            self.fallback_or_violation(node, "compound filled path", None)?;
+            return Ok(false);
+        }
+        if let Some(metadata) = source_metadata.as_ref()
+            && metadata.marker_declared
+            && metadata.marker_fully_recognized
+            && marker_promotion_allowed
+            && self.lower_marker_path(path, &subpaths, opacity, metadata)?
+        {
+            return Ok(true);
+        }
+        if source_metadata
+            .as_ref()
+            .is_some_and(|metadata| metadata.marker_declared)
+            && self.reported_marker_ids.insert(node.id().to_owned())
+        {
+            self.diagnostics.push(ConversionDiagnostic::new(
+                DiagnosticCode::MarkerPreservedAsGeometry,
+                DiagnosticSeverity::Fallback,
+                self.source_order,
+                "an SVG marker without a proven native equivalent was preserved as explicit \
+                 generated geometry",
+            ));
+        }
+        if path.fill().is_some()
+            && subpaths
+                .iter()
+                .any(|subpath| !is_simple_fill_boundary(subpath, self.options))
+        {
+            self.fallback_or_violation(node, "non-simple filled path", None)?;
+            return Ok(false);
+        }
+        let flattened = subpaths.iter().any(|subpath| subpath.curved);
+        for subpath in subpaths {
+            self.lower_subpath(path, &subpath, opacity)?;
+        }
+        if flattened {
+            self.diagnostics.push(ConversionDiagnostic::new(
+                DiagnosticCode::PathFlattened,
+                DiagnosticSeverity::Approximation,
+                self.source_order,
+                "curved path was flattened within the configured error bound",
+            ));
+        }
+        Ok(false)
+    }
+
+    fn path_preflight(
+        &mut self,
+        node: &usvg::Node,
+        path: &usvg::Path,
+        source_metadata: Option<&SourceNodeMetadata>,
+    ) -> Result<bool, ConversionError> {
+        if source_metadata
+            .is_some_and(|metadata| metadata.marker_declared && !metadata.marker_fully_recognized)
+            && self.reported_marker_ids.insert(node.id().to_owned())
+        {
+            self.diagnostics.push(ConversionDiagnostic::new(
+                DiagnosticCode::MarkerPreservedAsGeometry,
+                DiagnosticSeverity::Fallback,
+                self.source_order,
+                "an unrecognized SVG marker was preserved as explicit generated geometry",
+            ));
+        }
         if path.fill().is_none() && path.stroke().is_none() {
-            return Ok(());
+            return Ok(true);
         }
         if !path_has_only_solid_paint(path) || !stroke_transform_is_scalar(path) {
-            return self.fallback_or_violation(
-                node,
-                "non-native path paint or stroke transform",
-                None,
-            );
+            self.fallback_or_violation(node, "non-native path paint or stroke transform", None)?;
+            return Ok(true);
         }
         if path.stroke().is_some() && !stroke_is_exact_native(path) {
             self.diagnostics.push(ConversionDiagnostic::new(
@@ -248,7 +544,11 @@ impl<'a> LoweringContext<'a> {
                 "SVG stroke dash, cap, join, or miter semantics were approximated",
             ));
         }
-        let segment_count = path.data().segments().count();
+        self.reserve_path_segments(path.data().segments().count())?;
+        Ok(false)
+    }
+
+    fn reserve_path_segments(&mut self, segment_count: usize) -> Result<(), ConversionError> {
         if segment_count > self.options.limits.max_path_segments_per_path() {
             return Err(ConversionError::LimitExceeded {
                 resource: LimitResource::PathSegments,
@@ -267,59 +567,103 @@ impl<'a> LoweringContext<'a> {
                 limit: usize_to_u64(self.options.limits.max_path_segments()),
             });
         }
+        Ok(())
+    }
 
-        if looks_like_axis_aligned_ellipse(path) {
-            return self.lower_ellipse(path, opacity);
+    fn lower_correlated_rectangle(
+        &mut self,
+        node: &usvg::Node,
+        path: &usvg::Path,
+        opacity: f64,
+        metadata: &SourceNodeMetadata,
+    ) -> Result<bool, ConversionError> {
+        let transform = path.abs_transform();
+        if transform.kx.abs() > 1.0e-6 || transform.ky.abs() > 1.0e-6 {
+            return Ok(false);
         }
-        let has_curves = path
-            .data()
-            .segments()
-            .any(|segment| matches!(segment, PathSegment::QuadTo(..) | PathSegment::CubicTo(..)));
-        if has_curves
-            && matches!(
-                self.options.profile,
-                ConversionProfile::Fidelity | ConversionProfile::Strict
-            )
-        {
-            return self.fallback_or_violation(
-                node,
-                "curved path",
-                Some(DiagnosticCode::PathFlattened),
-            );
+        let Some((rx, ry)) = metadata.rect_radius else {
+            return Ok(false);
+        };
+        let horizontal_radius = rx * f64::from(transform.sx).abs() * self.scene_scale;
+        let vertical_radius = ry * f64::from(transform.sy).abs() * self.scene_scale;
+        let bbox = path.abs_bounding_box();
+        let x = f64::from(bbox.x()) * self.scene_scale;
+        let y = f64::from(bbox.y()) * self.scene_scale;
+        let width = f64::from(bbox.width()) * self.scene_scale;
+        let height = f64::from(bbox.height()) * self.scene_scale;
+        let source_horizontal_radius = horizontal_radius.min(width * 0.5);
+        let source_vertical_radius = vertical_radius.min(height * 0.5);
+        let radius = source_horizontal_radius.min(source_vertical_radius);
+        let target_radius = adaptive_target_radius(width.min(height), radius);
+        let radius_error = (source_horizontal_radius - target_radius)
+            .abs()
+            .max((source_vertical_radius - target_radius).abs());
+        if radius_error > self.options.geometry.max_native_radius_error_px() {
+            self.fallback_or_violation(node, "non-native rectangle corner radius", None)?;
+            return Ok(true);
         }
-
-        let subpaths = flatten_path(
-            path,
-            self.options.geometry.curve_tolerance_px(),
-            self.scene_scale,
-            self.options.limits.max_target_points(),
-        )?;
-        if subpaths.is_empty() {
-            return Ok(());
-        }
-        if subpaths.len() > 1 && path.fill().is_some() {
-            return self.fallback_or_violation(node, "compound filled path", None);
-        }
-        if path.fill().is_some()
-            && subpaths
-                .iter()
-                .any(|subpath| !is_simple_fill_boundary(subpath, self.options))
-        {
-            return self.fallback_or_violation(node, "non-simple filled path", None);
-        }
-        let flattened = subpaths.iter().any(|subpath| subpath.curved);
-        for subpath in subpaths {
-            self.lower_subpath(path, &subpath, opacity)?;
-        }
-        if flattened {
+        if radius_error > 1.0e-6 {
             self.diagnostics.push(ConversionDiagnostic::new(
-                DiagnosticCode::PathFlattened,
+                DiagnosticCode::CornerRadiusApproximated,
                 DiagnosticSeverity::Approximation,
                 self.source_order,
-                "curved path was flattened within the configured error bound",
+                "SVG rectangle corners were mapped within the configured target radius error",
             ));
         }
-        Ok(())
+        for role in paint_roles(path, true) {
+            let mut style = path_style(path, role, opacity, self.scene_scale);
+            style.roundness = (radius > 0.0).then_some(radius);
+            let base = self.make_base("rectangle", x, y, width, height, style)?;
+            self.push_element(ExcalidrawElement::rectangle(base))?;
+        }
+        Ok(true)
+    }
+
+    fn lower_marker_path(
+        &mut self,
+        path: &usvg::Path,
+        subpaths: &[Subpath],
+        opacity: f64,
+        metadata: &SourceNodeMetadata,
+    ) -> Result<bool, ConversionError> {
+        let Some(subpath) = subpaths.first() else {
+            return Ok(false);
+        };
+        let has_painted_fill = path.fill().is_some()
+            && subpath.points.len() >= 3
+            && !points_are_collinear(&subpath.points);
+        if subpaths.len() != 1
+            || subpath.closed
+            || has_painted_fill
+            || path.stroke().is_none()
+            || !marker_paint_matches(path, metadata)
+        {
+            return Ok(false);
+        }
+        let first = subpath
+            .points
+            .first()
+            .ok_or(ConversionError::GeometryOverflow)?;
+        let (_, _, width, height) = bounds(&subpath.points)?;
+        let mut local = Vec::with_capacity(subpath.points.len());
+        for point in &subpath.points {
+            local.push(LocalPoint::new(
+                point.x - first.x,
+                point.y - first.y,
+                &self.options.limits,
+            )?);
+        }
+        self.reserve_points(local.len())?;
+        let style = path_style(path, PaintRole::Stroke, opacity, self.scene_scale);
+        let base = self.make_base("arrow", first.x, first.y, width, height, style)?;
+        self.push_element(ExcalidrawElement::arrow(
+            base,
+            local,
+            metadata.marker_start,
+            metadata.marker_end,
+        ))?;
+        self.arrow_count = self.arrow_count.saturating_add(1);
+        Ok(true)
     }
 
     fn lower_ellipse(&mut self, path: &usvg::Path, opacity: f64) -> Result<(), ConversionError> {
@@ -423,6 +767,9 @@ impl<'a> LoweringContext<'a> {
         {
             return self.fallback_or_violation(node, "complex SVG text layout", None);
         }
+        if text.chunks().len() != 1 {
+            return self.fallback_or_violation(node, "multi-chunk SVG text", None);
+        }
         let mut content = String::new();
         let mut first_span = None;
         let mut align = TextAlign::Left;
@@ -446,6 +793,19 @@ impl<'a> LoweringContext<'a> {
         let span = first_span.ok_or(ConversionError::NormalizationFailed {
             category: "text has no style span",
         })?;
+        let transform = text.abs_transform();
+        if !target_font_supports(&content)
+            || transform.kx.abs() > 1.0e-6
+            || transform.ky.abs() > 1.0e-6
+            || transform.sx <= 0.0
+            || transform.sy <= 0.0
+        {
+            return self.fallback_or_violation(
+                node,
+                "unsupported glyph coverage or text transform",
+                None,
+            );
+        }
         if !is_exact_target_font(span) {
             self.diagnostics.push(ConversionDiagnostic::new(
                 DiagnosticCode::FontSubstituted,
@@ -454,11 +814,18 @@ impl<'a> LoweringContext<'a> {
                 "source text style was mapped to target-compatible Liberation Sans",
             ));
         }
+        if !is_exact_target_font_style(span) {
+            self.diagnostics.push(ConversionDiagnostic::new(
+                DiagnosticCode::FontStyleApproximated,
+                DiagnosticSeverity::Approximation,
+                self.source_order,
+                "source font weight, style, stretch, or spacing was approximated",
+            ));
+        }
         let color = solid_fill_color(span.fill()).ok_or(ConversionError::NormalizationFailed {
             category: "text paint is not a solid color",
         })?;
         let bbox = text.abs_bounding_box();
-        let transform = text.abs_transform();
         let x_scale = f64::from(transform.sx).hypot(f64::from(transform.ky));
         let font_size = f64::from(span.font_size().get()) * x_scale * self.scene_scale;
         let fill_opacity = span
@@ -669,7 +1036,12 @@ impl<'a> LoweringContext<'a> {
             } else {
                 ("native", Vec::new())
             };
-            base.set_provenance(self.source_order, role, mapping, diagnostic_codes);
+            base.set_provenance(
+                self.source_order,
+                &self.current_source_tag,
+                mapping,
+                diagnostic_codes,
+            );
         }
         Ok(base)
     }
@@ -686,7 +1058,35 @@ impl<'a> LoweringContext<'a> {
                 category: "deterministic element ID collision",
             });
         }
+        self.element_groups.push(self.active_groups.clone());
         self.elements.push(element);
+        Ok(())
+    }
+
+    fn finalize_groups(&mut self) -> Result<(), ConversionError> {
+        let mut counts = BTreeMap::<GroupKey, usize>::new();
+        for groups in &self.element_groups {
+            for key in groups {
+                *counts.entry(*key).or_default() += 1;
+            }
+        }
+        let mut target_ids = BTreeMap::<GroupKey, GroupId>::new();
+        for (key, count) in &counts {
+            if *count >= 2 {
+                target_ids.insert(
+                    *key,
+                    GroupId::new(group_id(self.digest, key.source_order, key.instance)?),
+                );
+            }
+        }
+        for (element, groups) in self.elements.iter_mut().zip(&self.element_groups) {
+            let group_ids = groups
+                .iter()
+                .rev()
+                .filter_map(|key| target_ids.get(key).cloned())
+                .collect();
+            element.set_group_ids(group_ids);
+        }
         Ok(())
     }
 
@@ -716,6 +1116,86 @@ fn path_has_only_solid_paint(path: &usvg::Path) -> bool {
             .is_none_or(|stroke| matches!(stroke.paint(), usvg::Paint::Color(_)))
 }
 
+fn marker_paint_matches(path: &usvg::Path, metadata: &SourceNodeMetadata) -> bool {
+    let Some(usvg::Paint::Color(color)) = path.stroke().map(usvg::Stroke::paint) else {
+        return false;
+    };
+    let actual = [color.red, color.green, color.blue];
+    metadata
+        .marker_start_color
+        .is_none_or(|expected| expected == actual)
+        && metadata
+            .marker_end_color
+            .is_none_or(|expected| expected == actual)
+}
+
+fn marker_artwork_matches(
+    artwork: &usvg::Group,
+    connector: &usvg::Path,
+    metadata: &SourceNodeMetadata,
+) -> bool {
+    let expected_paths = usize::from(metadata.marker_start.is_some())
+        .saturating_add(usize::from(metadata.marker_end.is_some()));
+    if expected_paths == 0 || !marker_paint_matches(connector, metadata) {
+        return false;
+    }
+    let Some(usvg::Paint::Color(connector_color)) = connector.stroke().map(usvg::Stroke::paint)
+    else {
+        return false;
+    };
+    let mut path_count = 0_usize;
+    marker_group_has_native_paint(artwork, *connector_color, &mut path_count)
+        && path_count == expected_paths
+}
+
+fn marker_group_has_native_paint(
+    group: &usvg::Group,
+    expected_color: usvg::Color,
+    path_count: &mut usize,
+) -> bool {
+    if (group.opacity().get() - 1.0).abs() > f32::EPSILON
+        || group.blend_mode() != usvg::BlendMode::Normal
+        || group.isolate()
+        || group.mask().is_some()
+        || !group.filters().is_empty()
+    {
+        return false;
+    }
+    for child in group.children() {
+        match child {
+            usvg::Node::Group(nested) => {
+                if !marker_group_has_native_paint(nested, expected_color, path_count) {
+                    return false;
+                }
+            }
+            usvg::Node::Path(path) => {
+                let Some(fill) = path.fill() else {
+                    return false;
+                };
+                if path.stroke().is_some()
+                    || (fill.opacity().get() - 1.0).abs() > f32::EPSILON
+                    || !matches!(fill.paint(), usvg::Paint::Color(color) if *color == expected_color)
+                {
+                    return false;
+                }
+                *path_count = path_count.saturating_add(1);
+            }
+            usvg::Node::Image(_) | usvg::Node::Text(_) => return false,
+        }
+    }
+    true
+}
+
+fn adaptive_target_radius(minimum_dimension: f64, configured_radius: f64) -> f64 {
+    const PROPORTIONAL_RADIUS: f64 = 0.25;
+
+    if minimum_dimension <= configured_radius / PROPORTIONAL_RADIUS {
+        minimum_dimension * PROPORTIONAL_RADIUS
+    } else {
+        configured_radius
+    }
+}
+
 fn stroke_transform_is_scalar(path: &usvg::Path) -> bool {
     if path.stroke().is_none() {
         return true;
@@ -739,12 +1219,31 @@ fn is_exact_target_font(span: &usvg::TextSpan) -> bool {
     matches!(
         span.font().families().first(),
         Some(usvg::FontFamily::Named(name)) if name.eq_ignore_ascii_case("Liberation Sans")
-    ) && span.font().style() == usvg::FontStyle::Normal
+    ) && is_exact_target_font_style(span)
+}
+
+fn is_exact_target_font_style(span: &usvg::TextSpan) -> bool {
+    span.font().style() == usvg::FontStyle::Normal
         && span.font().stretch() == usvg::FontStretch::Normal
         && span.font().weight() == 400
         && !span.small_caps()
         && span.letter_spacing() == 0.0
         && span.word_spacing() == 0.0
+}
+
+fn target_font_supports(text: &str) -> bool {
+    use skrifa::MetadataProvider as _;
+
+    static TARGET_FACE: OnceLock<Option<skrifa::FontRef<'static>>> = OnceLock::new();
+
+    TARGET_FACE
+        .get_or_init(|| skrifa::FontRef::new(crate::ingest::bundled_target_font()).ok())
+        .as_ref()
+        .is_some_and(|face| {
+            text.chars().all(|character| {
+                character.is_whitespace() || face.charmap().map(character).is_some()
+            })
+        })
 }
 
 fn paint_roles(path: &usvg::Path, can_combine: bool) -> Vec<PaintRole> {
@@ -1068,8 +1567,14 @@ fn flatten_quad(
     output: &mut Vec<Point>,
     max_points: usize,
 ) -> Result<(), ConversionError> {
-    if distance_to_line(control, start, end) <= tolerance || depth >= 20 {
+    if distance_to_line(control, start, end) <= tolerance {
         return push_bounded(output, end, max_points);
+    }
+    if depth >= 20 {
+        return Err(ConversionError::LimitExceeded {
+            resource: LimitResource::WorkUnits,
+            limit: 20,
+        });
     }
     let start_control = start.midpoint(control);
     let control_end = control.midpoint(end);
@@ -1107,8 +1612,14 @@ fn flatten_cubic(
 ) -> Result<(), ConversionError> {
     let flatness =
         distance_to_line(control1, start, end).max(distance_to_line(control2, start, end));
-    if flatness <= tolerance || depth >= 20 {
+    if flatness <= tolerance {
         return push_bounded(output, end, max_points);
+    }
+    if depth >= 20 {
+        return Err(ConversionError::LimitExceeded {
+            resource: LimitResource::WorkUnits,
+            limit: 20,
+        });
     }
     let left_edge = start.midpoint(control1);
     let center_edge = control1.midpoint(control2);
@@ -1277,6 +1788,9 @@ fn usize_to_u64(value: usize) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
+    use super::{Point, flatten_cubic};
     use crate::{ConversionOptions, convert};
 
     #[test]
@@ -1294,5 +1808,46 @@ mod tests {
         );
         assert_eq!(first.document.elements().len(), 3);
         Ok(())
+    }
+
+    proptest! {
+        #[test]
+        fn test_should_not_increase_cubic_points_when_tolerance_increases(
+            x1 in -100.0_f64..100.0,
+            y1 in -100.0_f64..100.0,
+            x2 in -100.0_f64..100.0,
+            y2 in -100.0_f64..100.0,
+            tolerance in 0.05_f64..4.0,
+        ) {
+            let start = Point { x: 0.0, y: 0.0 };
+            let control1 = Point { x: x1, y: y1 };
+            let control2 = Point { x: x2, y: y2 };
+            let end = Point { x: 100.0, y: 0.0 };
+            let mut finer = vec![start];
+            let mut coarser = vec![start];
+            let fine_result = flatten_cubic(
+                start,
+                control1,
+                control2,
+                end,
+                tolerance,
+                0,
+                &mut finer,
+                100_000,
+            );
+            let coarse_result = flatten_cubic(
+                start,
+                control1,
+                control2,
+                end,
+                tolerance * 2.0,
+                0,
+                &mut coarser,
+                100_000,
+            );
+            prop_assert!(fine_result.is_ok());
+            prop_assert!(coarse_result.is_ok());
+            prop_assert!(coarser.len() <= finer.len());
+        }
     }
 }

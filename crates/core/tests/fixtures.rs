@@ -1,10 +1,12 @@
 //! Feature and canonical-fixture integration tests.
 
+use std::collections::BTreeSet;
+
 use base64::Engine as _;
 use serde_json::Value;
 use svg2excal_core::{
-    ConversionError, ConversionOptions, ConversionProfile, ExcalidrawDocument, ProvenanceMode,
-    convert,
+    ConversionError, ConversionOptions, ConversionProfile, DiagnosticCode, ExcalidrawDocument,
+    ProvenanceMode, convert,
 };
 
 #[test]
@@ -69,6 +71,89 @@ fn test_should_convert_arch_fixture_deterministically() -> Result<(), Box<dyn st
             .count(),
         86
     );
+    assert_eq!(
+        first
+            .document
+            .elements()
+            .iter()
+            .filter(|element| element.element_type() == "arrow")
+            .count(),
+        27
+    );
+    assert_eq!(
+        first
+            .document
+            .elements()
+            .iter()
+            .filter(|element| element.element_type() == "image")
+            .count(),
+        8
+    );
+    assert_eq!(
+        first
+            .report
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code() == DiagnosticCode::FilterOmitted)
+            .count(),
+        24
+    );
+    assert_eq!(
+        first
+            .report
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code() == DiagnosticCode::BindingNotInferred)
+            .count(),
+        1
+    );
+    let json: Value = serde_json::from_str(&first.document.to_pretty_json()?)?;
+    let elements = json
+        .get("elements")
+        .and_then(Value::as_array)
+        .ok_or_else(|| std::io::Error::other("missing arch elements"))?;
+    assert_eq!(
+        elements
+            .first()
+            .and_then(|element| element.get("type"))
+            .and_then(Value::as_str),
+        Some("rectangle")
+    );
+    assert!(
+        elements
+            .iter()
+            .filter_map(|element| element.get("roundness"))
+            .filter(|roundness| !roundness.is_null())
+            .count()
+            >= 24
+    );
+    assert!(elements.iter().all(|element| {
+        element.get("frameId").is_some_and(Value::is_null)
+            && element.get("boundElements").is_some_and(Value::is_null)
+    }));
+    let arrows = elements
+        .iter()
+        .filter(|element| element.get("type").and_then(Value::as_str) == Some("arrow"))
+        .collect::<Vec<_>>();
+    assert!(arrows.iter().all(|arrow| {
+        arrow.get("endArrowhead").and_then(Value::as_str) == Some("triangle")
+            && arrow.get("startBinding").is_some_and(Value::is_null)
+            && arrow.get("endBinding").is_some_and(Value::is_null)
+    }));
+    assert_eq!(
+        arrows
+            .iter()
+            .filter(|arrow| !arrow.get("startArrowhead").is_none_or(Value::is_null))
+            .count(),
+        1
+    );
+    let group_ids = elements
+        .iter()
+        .filter_map(|element| element.get("groupIds").and_then(Value::as_array))
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect::<BTreeSet<_>>();
+    assert!(group_ids.len() >= 26);
     Ok(())
 }
 
@@ -189,5 +274,282 @@ fn test_should_round_trip_compact_provenance() -> Result<(), Box<dyn std::error:
         .to_pretty_json_with_limits(&options.limits)?;
     assert!(json.contains("\"svg2excal\""));
     ExcalidrawDocument::from_json(json.as_bytes(), &options.limits)?;
+    Ok(())
+}
+
+#[test]
+fn test_should_group_multiple_elements_from_explicit_source_group()
+-> Result<(), Box<dyn std::error::Error>> {
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40">
+      <g><rect width="30" height="30" fill="#f00"/><circle cx="55" cy="15" r="15" fill="#00f"/></g>
+    </svg>"##;
+    let result = convert(input, &ConversionOptions::default())?;
+    let json: Value = serde_json::from_str(&result.document.to_pretty_json()?)?;
+    let first = json
+        .pointer("/elements/0/groupIds/0")
+        .and_then(Value::as_str);
+    let second = json
+        .pointer("/elements/1/groupIds/0")
+        .and_then(Value::as_str);
+    assert!(first.is_some());
+    assert_eq!(first, second);
+    Ok(())
+}
+
+#[test]
+fn test_should_not_change_id_attribute_selector_semantics() -> Result<(), Box<dyn std::error::Error>>
+{
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg" width="50" height="20">
+      <style>[id] { fill: #ff0000; }</style>
+      <rect id="authored" width="20" height="20" fill="#0000ff"/>
+      <rect x="30" width="20" height="20" fill="#0000ff"/>
+    </svg>"##;
+    let result = convert(input, &ConversionOptions::default())?;
+    let json: Value = serde_json::from_str(&result.document.to_pretty_json()?)?;
+    assert_eq!(
+        json.pointer("/elements/0/backgroundColor")
+            .and_then(Value::as_str),
+        Some("#ff0000")
+    );
+    assert_eq!(
+        json.pointer("/elements/1/backgroundColor")
+            .and_then(Value::as_str),
+        Some("#0000ff")
+    );
+    Ok(())
+}
+
+#[test]
+fn test_should_promote_recognized_endpoint_marker_to_arrow()
+-> Result<(), Box<dyn std::error::Error>> {
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="30">
+      <defs><marker id="head" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0.6 L9.5 5 L0 9.4 Z" fill="#000000"/></marker></defs>
+      <line x1="5" y1="15" x2="95" y2="15" stroke="#000" marker-end="url(#head)"/>
+    </svg>"##;
+    let result = convert(input, &ConversionOptions::default())?;
+    let json: Value = serde_json::from_str(&result.document.to_pretty_json()?)?;
+    assert_eq!(
+        json.pointer("/elements/0/type").and_then(Value::as_str),
+        Some("arrow")
+    );
+    assert_eq!(
+        json.pointer("/elements/0/endArrowhead")
+            .and_then(Value::as_str),
+        Some("triangle")
+    );
+    assert!(
+        json.pointer("/elements/0/startArrowhead")
+            .is_some_and(Value::is_null)
+    );
+    Ok(())
+}
+
+#[test]
+fn test_should_emit_correlated_rounded_rectangle() -> Result<(), Box<dyn std::error::Error>> {
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
+      <rect x="5" y="5" width="90" height="40" rx="8" fill="#fff" stroke="#000"/>
+    </svg>"##;
+    let result = convert(input, &ConversionOptions::default())?;
+    let json: Value = serde_json::from_str(&result.document.to_pretty_json()?)?;
+    assert_eq!(
+        json.pointer("/elements/0/type").and_then(Value::as_str),
+        Some("rectangle")
+    );
+    assert_eq!(
+        json.pointer("/elements/0/roundness/type")
+            .and_then(Value::as_u64),
+        Some(3)
+    );
+    assert_eq!(
+        json.pointer("/elements/0/roundness/value")
+            .and_then(Value::as_f64),
+        Some(8.0)
+    );
+    Ok(())
+}
+
+#[test]
+fn test_should_rasterize_text_outside_target_font_coverage()
+-> Result<(), Box<dyn std::error::Error>> {
+    let input = r#"<svg xmlns="http://www.w3.org/2000/svg" width="50" height="40">
+      <text x="5" y="30" font-size="24">漢</text>
+    </svg>"#;
+    let result = convert(input.as_bytes(), &ConversionOptions::default())?;
+    assert_eq!(
+        result
+            .document
+            .elements()
+            .first()
+            .map(svg2excal_core::ExcalidrawElement::element_type),
+        Some("image")
+    );
+    let strict = ConversionOptions::builder()
+        .profile(ConversionProfile::Strict)
+        .build();
+    assert!(matches!(
+        convert(input.as_bytes(), &strict),
+        Err(ConversionError::StrictFidelityViolation { .. })
+    ));
+    Ok(())
+}
+
+#[test]
+fn test_should_preserve_noncanonical_marker_as_geometry() -> Result<(), Box<dyn std::error::Error>>
+{
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="30">
+      <defs><marker id="head" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#000000"/></marker></defs>
+      <line x1="5" y1="15" x2="95" y2="15" stroke="#000" marker-end="url(#head)"/>
+    </svg>"##;
+    let result = convert(input, &ConversionOptions::default())?;
+    assert!(
+        result
+            .document
+            .elements()
+            .iter()
+            .all(|element| element.element_type() != "arrow")
+    );
+    assert!(result.document.elements().len() >= 2);
+    assert!(
+        result
+            .report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code() == DiagnosticCode::MarkerPreservedAsGeometry })
+    );
+    Ok(())
+}
+
+#[test]
+fn test_should_not_promote_marker_when_connector_has_painted_open_fill()
+-> Result<(), Box<dyn std::error::Error>> {
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="40">
+      <defs><marker id="head" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto"><path d="M0 0.6 L9.5 5 L0 9.4 Z" fill="#000000"/></marker></defs>
+      <path d="M5 30 L50 5 L95 30" fill="#ff0000" stroke="#000000" marker-end="url(#head)"/>
+    </svg>"##;
+    let result = convert(input, &ConversionOptions::default())?;
+    let json: Value = serde_json::from_str(&result.document.to_pretty_json()?)?;
+    let elements = json
+        .get("elements")
+        .and_then(Value::as_array)
+        .ok_or_else(|| std::io::Error::other("missing elements"))?;
+    assert!(
+        elements
+            .iter()
+            .all(|element| { element.get("type").and_then(Value::as_str) != Some("arrow") })
+    );
+    assert!(elements.iter().any(|element| {
+        element.get("backgroundColor").and_then(Value::as_str) == Some("#ff0000")
+    }));
+    Ok(())
+}
+
+#[test]
+fn test_should_rasterize_radius_outside_excalidraw_adaptive_model()
+-> Result<(), Box<dyn std::error::Error>> {
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40">
+      <rect x="5" y="3" width="110" height="34" rx="17" fill="#ffffff" stroke="#000000"/>
+    </svg>"##;
+    let result = convert(input, &ConversionOptions::default())?;
+    assert_eq!(
+        result
+            .document
+            .elements()
+            .first()
+            .map(svg2excal_core::ExcalidrawElement::element_type),
+        Some("image")
+    );
+    assert!(
+        result
+            .report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code() == DiagnosticCode::PaintIslandRasterized })
+    );
+    Ok(())
+}
+
+#[test]
+fn test_should_rasterize_multi_chunk_text_as_one_paint_island()
+-> Result<(), Box<dyn std::error::Error>> {
+    let input = br#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="30">
+      <text y="20" font-family="Liberation Sans" font-size="16"><tspan x="2">left</tspan><tspan x="50">right</tspan></text>
+    </svg>"#;
+    let result = convert(input, &ConversionOptions::default())?;
+    assert_eq!(result.document.elements().len(), 1);
+    assert_eq!(
+        result
+            .document
+            .elements()
+            .first()
+            .map(svg2excal_core::ExcalidrawElement::element_type),
+        Some("image")
+    );
+    Ok(())
+}
+
+#[test]
+fn test_should_not_omit_shadow_from_partially_transparent_group()
+-> Result<(), Box<dyn std::error::Error>> {
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg" width="60" height="40">
+      <defs><filter id="shadow"><feDropShadow dx="1" dy="1" stdDeviation="2" flood-color="#000000" flood-opacity="0.1"/></filter></defs>
+      <g opacity="0.5" filter="url(#shadow)"><rect x="5" y="5" width="50" height="30" fill="#ff0000"/></g>
+    </svg>"##;
+    let result = convert(input, &ConversionOptions::default())?;
+    assert_eq!(result.document.elements().len(), 1);
+    assert_eq!(
+        result
+            .document
+            .elements()
+            .first()
+            .map(svg2excal_core::ExcalidrawElement::element_type),
+        Some("image")
+    );
+    assert!(
+        result
+            .report
+            .diagnostics
+            .iter()
+            .all(|diagnostic| { diagnostic.code() != DiagnosticCode::FilterOmitted })
+    );
+    Ok(())
+}
+
+#[test]
+fn test_should_assign_distinct_group_ids_to_reused_definition_instances()
+-> Result<(), Box<dyn std::error::Error>> {
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="40">
+      <defs><g id="icon"><rect width="10" height="10"/><rect x="12" width="10" height="10"/></g></defs>
+      <use href="#icon" x="5" y="5"/><use href="#icon" x="60" y="5"/>
+    </svg>"##;
+    let result = convert(input, &ConversionOptions::default())?;
+    let json: Value = serde_json::from_str(&result.document.to_pretty_json()?)?;
+    let elements = json
+        .get("elements")
+        .and_then(Value::as_array)
+        .ok_or_else(|| std::io::Error::other("missing elements"))?;
+    assert_eq!(elements.len(), 4);
+    let first_ids = elements
+        .first()
+        .and_then(|element| element.get("groupIds"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| std::io::Error::other("missing first group IDs"))?;
+    let second_ids = elements
+        .get(1)
+        .and_then(|element| element.get("groupIds"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| std::io::Error::other("missing second group IDs"))?;
+    let third_ids = elements
+        .get(2)
+        .and_then(|element| element.get("groupIds"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| std::io::Error::other("missing third group IDs"))?;
+    let fourth_ids = elements
+        .get(3)
+        .and_then(|element| element.get("groupIds"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| std::io::Error::other("missing fourth group IDs"))?;
+    assert_eq!(first_ids, second_ids);
+    assert_eq!(third_ids, fourth_ids);
+    assert!(first_ids.iter().all(|id| !third_ids.contains(id)));
     Ok(())
 }

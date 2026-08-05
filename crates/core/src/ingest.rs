@@ -12,6 +12,7 @@ use crate::{
     identity::document_digest,
     report::{ConversionDiagnostic, DiagnosticCode, DiagnosticSeverity},
     resource::{ProvidedResourcePolicy, ResourceContext, ResourceRequest},
+    source::{SourceMetadata, prepare_source},
 };
 
 const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
@@ -19,6 +20,18 @@ const LIBERATION_SANS: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../vendors/excalidraw/scripts/woff2/assets/LiberationSans-Regular.ttf"
 ));
+const NOTO_EMOJI: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../vendors/excalidraw/scripts/woff2/assets/NotoEmoji-Regular.ttf"
+));
+const XIAOLAI: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../vendors/excalidraw/scripts/woff2/assets/Xiaolai-Regular.ttf"
+));
+
+pub(crate) const fn bundled_target_font() -> &'static [u8] {
+    LIBERATION_SANS
+}
 
 #[derive(Debug)]
 pub(crate) struct SourceCensus {
@@ -36,6 +49,7 @@ pub(crate) struct NormalizedInput {
     pub(crate) input_bytes: usize,
     pub(crate) paint_nodes: usize,
     pub(crate) digest: blake3::Hash,
+    pub(crate) source: SourceMetadata,
 }
 
 pub(crate) fn normalize(
@@ -76,9 +90,18 @@ pub(crate) fn normalize(
         .map_err(|error| sanitize_xml_error(&error))?;
     validate_root(&document)?;
     let census = census(&document, options)?;
+    let prepared = prepare_source(text, &document, &options.limits)?;
     let resolved = resolve_external_images(&census.external_references, options, resources)?;
     let usvg_options = deterministic_usvg_options(options, &resolved);
-    let tree = usvg::Tree::from_xmltree(&document, &usvg_options)
+    let instrumented = usvg::roxmltree::Document::parse_with_options(
+        &prepared.xml,
+        usvg::roxmltree::ParsingOptions {
+            allow_dtd: false,
+            ..Default::default()
+        },
+    )
+    .map_err(|error| sanitize_xml_error(&error))?;
+    let tree = usvg::Tree::from_xmltree(&instrumented, &usvg_options)
         .map_err(|error| sanitize_normalization_error(&error))?;
 
     let paint_nodes = count_paint_nodes(tree.root(), options.limits.max_paint_nodes())?;
@@ -99,6 +122,7 @@ pub(crate) fn normalize(
         input_bytes: input.len(),
         paint_nodes,
         digest,
+        source: prepared.metadata,
     })
 }
 
@@ -545,7 +569,9 @@ fn deterministic_usvg_options(
     };
     if options.fonts.substitute_with_liberation_sans() {
         let fontdb = usvg_options.fontdb_mut();
-        fontdb.load_font_data(LIBERATION_SANS.to_vec());
+        fontdb.load_font_source(usvg::fontdb::Source::Binary(Arc::new(LIBERATION_SANS)));
+        fontdb.load_font_source(usvg::fontdb::Source::Binary(Arc::new(NOTO_EMOJI)));
+        fontdb.load_font_source(usvg::fontdb::Source::Binary(Arc::new(XIAOLAI)));
         fontdb.set_serif_family("Liberation Sans");
         fontdb.set_sans_serif_family("Liberation Sans");
     }

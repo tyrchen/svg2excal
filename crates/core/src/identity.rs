@@ -51,6 +51,21 @@ pub(crate) fn file_id(bytes: &[u8]) -> Result<String, ConversionError> {
     short_id(b"svg2excal/file/v1", &[b"image/png", bytes])
 }
 
+pub(crate) fn group_id(
+    document: &blake3::Hash,
+    source_order: u32,
+    depth: u32,
+) -> Result<String, ConversionError> {
+    short_id(
+        b"svg2excal/group/v1",
+        &[
+            document.as_bytes(),
+            &source_order.to_be_bytes(),
+            &depth.to_be_bytes(),
+        ],
+    )
+}
+
 fn short_id(domain: &[u8], fields: &[&[u8]]) -> Result<String, ConversionError> {
     let digest = domain_hash(domain, fields)?;
     let prefix = digest

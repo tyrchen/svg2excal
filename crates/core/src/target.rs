@@ -40,6 +40,10 @@ impl FileId {
 pub struct GroupId(String);
 
 impl GroupId {
+    pub(crate) fn new(value: String) -> Self {
+        Self(value)
+    }
+
     /// Identifier text.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -288,6 +292,10 @@ impl ElementBase {
         });
     }
 
+    pub(crate) fn set_group_ids(&mut self, group_ids: Vec<GroupId>) {
+        self.group_ids = group_ids;
+    }
+
     fn validate(&self, limits: &ConversionLimits) -> bool {
         !self.id.0.is_empty()
             && self.id.0.len() <= 64
@@ -343,7 +351,10 @@ impl Svg2ExcalCustomDataEnvelope {
                 .source_tag
                 .bytes()
                 .all(|byte| byte.is_ascii_lowercase() || byte == b'-')
-            && matches!(data.mapping.as_str(), "native" | "decomposed" | "fallback")
+            && matches!(
+                data.mapping.as_str(),
+                "native" | "approximate" | "decomposed" | "fallback"
+            )
             && data.diagnostic_codes.len() <= 16
             && data.diagnostic_codes.iter().all(|code| {
                 !code.is_empty()
@@ -549,6 +560,36 @@ impl ExcalidrawElement {
             end_arrowhead: None,
             polygon,
         })
+    }
+
+    pub(crate) fn arrow(
+        base: ElementBase,
+        points: Vec<LocalPoint>,
+        start_arrowhead: Option<Arrowhead>,
+        end_arrowhead: Option<Arrowhead>,
+    ) -> Self {
+        Self::Arrow(ArrowElement {
+            base,
+            points,
+            start_binding: None,
+            end_binding: None,
+            start_arrowhead,
+            end_arrowhead,
+            polygon: false,
+            elbowed: false,
+        })
+    }
+
+    pub(crate) fn set_group_ids(&mut self, group_ids: Vec<GroupId>) {
+        match self {
+            Self::Rectangle(element) | Self::Diamond(element) | Self::Ellipse(element) => {
+                element.base.set_group_ids(group_ids);
+            }
+            Self::Line(element) => element.base.set_group_ids(group_ids),
+            Self::Arrow(element) => element.base.set_group_ids(group_ids),
+            Self::Text(element) => element.base.set_group_ids(group_ids),
+            Self::Image(element) => element.base.set_group_ids(group_ids),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
