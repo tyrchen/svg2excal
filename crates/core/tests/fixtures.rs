@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 use base64::Engine as _;
 use serde_json::Value;
 use svg2excal_core::{
-    ConversionError, ConversionOptions, ConversionProfile, DiagnosticCode, ExcalidrawDocument,
-    ProvenanceMode, convert,
+    ConversionError, ConversionOptions, ConversionProfile, ConversionResult, DiagnosticCode,
+    ExcalidrawDocument, ProvenanceMode, RasterOptions, convert,
 };
 
 #[test]
@@ -62,8 +62,14 @@ fn test_should_convert_arch_fixture_deterministically() -> Result<(), Box<dyn st
         first.document.to_pretty_json()?,
         second.document.to_pretty_json()?
     );
+    assert_arch_counts(&first);
+    assert_arch_target_json(&first)?;
+    Ok(())
+}
+
+fn assert_arch_counts(result: &ConversionResult) {
     assert_eq!(
-        first
+        result
             .document
             .elements()
             .iter()
@@ -72,7 +78,7 @@ fn test_should_convert_arch_fixture_deterministically() -> Result<(), Box<dyn st
         86
     );
     assert_eq!(
-        first
+        result
             .document
             .elements()
             .iter()
@@ -81,7 +87,7 @@ fn test_should_convert_arch_fixture_deterministically() -> Result<(), Box<dyn st
         27
     );
     assert_eq!(
-        first
+        result
             .document
             .elements()
             .iter()
@@ -90,7 +96,7 @@ fn test_should_convert_arch_fixture_deterministically() -> Result<(), Box<dyn st
         8
     );
     assert_eq!(
-        first
+        result
             .report
             .diagnostics
             .iter()
@@ -99,7 +105,16 @@ fn test_should_convert_arch_fixture_deterministically() -> Result<(), Box<dyn st
         24
     );
     assert_eq!(
-        first
+        result
+            .report
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code() == DiagnosticCode::PaintIslandRasterized)
+            .count(),
+        8
+    );
+    assert_eq!(
+        result
             .report
             .diagnostics
             .iter()
@@ -107,7 +122,10 @@ fn test_should_convert_arch_fixture_deterministically() -> Result<(), Box<dyn st
             .count(),
         1
     );
-    let json: Value = serde_json::from_str(&first.document.to_pretty_json()?)?;
+}
+
+fn assert_arch_target_json(result: &ConversionResult) -> Result<(), Box<dyn std::error::Error>> {
+    let json: Value = serde_json::from_str(&result.document.to_pretty_json()?)?;
     let elements = json
         .get("elements")
         .and_then(Value::as_array)
@@ -195,10 +213,11 @@ fn test_should_reject_non_native_stroke_semantics_in_strict_profile() {
     let options = ConversionOptions::builder()
         .profile(ConversionProfile::Strict)
         .build();
-    assert!(matches!(
-        convert(input, &options),
-        Err(ConversionError::StrictFidelityViolation { .. })
-    ));
+    let result = convert(input, &options);
+    assert!(
+        matches!(result, Err(ConversionError::StrictFidelityViolation { .. })),
+        "unexpected strict result: {result:?}"
+    );
 }
 
 #[test]
@@ -551,5 +570,178 @@ fn test_should_assign_distinct_group_ids_to_reused_definition_instances()
     assert_eq!(first_ids, second_ids);
     assert_eq!(third_ids, fourth_ids);
     assert!(first_ids.iter().all(|id| !third_ids.contains(id)));
+    Ok(())
+}
+
+#[test]
+fn test_should_decompose_disjoint_compound_fill_only_in_editable_profile()
+-> Result<(), Box<dyn std::error::Error>> {
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg" width="60" height="25">
+      <path d="M2 2 H22 V22 H2 Z M38 2 H58 V22 H38 Z" fill="#ff0000"/>
+    </svg>"##;
+    let balanced = convert(input, &ConversionOptions::default())?;
+    assert_eq!(
+        balanced
+            .document
+            .elements()
+            .first()
+            .map(svg2excal_core::ExcalidrawElement::element_type),
+        Some("image")
+    );
+
+    let editable_options = ConversionOptions::builder()
+        .profile(ConversionProfile::Editable)
+        .build();
+    let editable = convert(input, &editable_options)?;
+    assert_eq!(editable.document.elements().len(), 2);
+    assert!(
+        editable.document.elements().iter().all(|element| {
+            element.element_type() != "image" && !element.group_ids().is_empty()
+        })
+    );
+    assert!(
+        editable
+            .report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code() == DiagnosticCode::CompoundPathDecomposed })
+    );
+    Ok(())
+}
+
+#[test]
+fn test_should_report_specific_fallback_island_kind() -> Result<(), Box<dyn std::error::Error>> {
+    let gradient = br##"<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30">
+      <defs><linearGradient id="g"><stop stop-color="#f00"/><stop offset="1" stop-color="#00f"/></linearGradient></defs>
+      <rect width="30" height="30" fill="url(#g)"/>
+    </svg>"##;
+    let result = convert(gradient, &ConversionOptions::default())?;
+    assert!(
+        result
+            .report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code() == DiagnosticCode::GradientRasterized })
+    );
+
+    let clipped = br##"<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30">
+      <defs><clipPath id="c"><circle cx="15" cy="15" r="10"/></clipPath></defs>
+      <g clip-path="url(#c)"><rect width="30" height="30" fill="#f00"/></g>
+    </svg>"##;
+    let result = convert(clipped, &ConversionOptions::default())?;
+    assert!(
+        result
+            .report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code() == DiagnosticCode::ClipRasterized })
+    );
+    Ok(())
+}
+
+#[test]
+fn test_should_make_fidelity_profile_rasterize_visible_approximations()
+-> Result<(), Box<dyn std::error::Error>> {
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg" width="140" height="40">
+      <text x="2" y="20" font-family="Inter" font-size="16">substitute</text>
+      <path d="M2 32 H138" stroke="#000" stroke-dasharray="7 3"/>
+    </svg>"##;
+    let options = ConversionOptions::builder()
+        .profile(ConversionProfile::Fidelity)
+        .build();
+    let result = convert(input, &options)?;
+    assert_eq!(
+        result
+            .document
+            .elements()
+            .iter()
+            .filter(|element| element.element_type() == "image")
+            .count(),
+        2
+    );
+    assert!(
+        result.document.elements().iter().all(|element| {
+            element.element_type() != "text" && element.element_type() != "line"
+        })
+    );
+    Ok(())
+}
+
+#[test]
+fn test_should_gate_nested_svg_data_images_by_explicit_option()
+-> Result<(), Box<dyn std::error::Error>> {
+    let nested = br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><circle cx="10" cy="10" r="8" fill="#ff0000"/></svg>"##;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(nested);
+    let outer = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30"><image x="5" y="5" width="20" height="20" href="data:image/svg+xml;base64,{encoded}"/></svg>"#
+    );
+    assert!(matches!(
+        convert(outer.as_bytes(), &ConversionOptions::default()),
+        Err(ConversionError::ResourceDenied { .. })
+    ));
+
+    let raster = RasterOptions::try_new(2.0, true)?;
+    let options = ConversionOptions::builder().raster(raster).build();
+    let result = convert(outer.as_bytes(), &options)?;
+    assert_eq!(
+        result
+            .document
+            .elements()
+            .first()
+            .map(svg2excal_core::ExcalidrawElement::element_type),
+        Some("image")
+    );
+    Ok(())
+}
+
+#[test]
+fn test_should_render_transformed_zero_area_stroke_fallback()
+-> Result<(), Box<dyn std::error::Error>> {
+    let input = br##"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="100">
+      <path d="M0 0 H30" transform="translate(42 35) rotate(20) scale(2)" fill="none" stroke="#e11d48" stroke-width="3" stroke-dasharray="7 3"/>
+    </svg>"##;
+    let options = ConversionOptions::builder()
+        .profile(ConversionProfile::Fidelity)
+        .build();
+    let result = convert(input, &options)?;
+    let file = result
+        .document
+        .files()
+        .values()
+        .next()
+        .ok_or_else(|| std::io::Error::other("missing fallback image"))?;
+    let encoded = file
+        .data_url()
+        .strip_prefix("data:image/png;base64,")
+        .ok_or_else(|| std::io::Error::other("invalid fallback URL"))?;
+    let png = base64::engine::general_purpose::STANDARD.decode(encoded)?;
+    let pixmap = resvg::tiny_skia::Pixmap::decode_png(&png)?;
+    assert!(pixmap.pixels().iter().any(|pixel| pixel.alpha() != 0));
+    Ok(())
+}
+
+#[test]
+fn test_should_accept_static_raster_image_in_strict_profile()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(2, 2)
+        .ok_or_else(|| std::io::Error::other("invalid test pixmap"))?;
+    pixmap.fill(resvg::tiny_skia::Color::from_rgba8(255, 0, 0, 255));
+    let encoded = base64::engine::general_purpose::STANDARD.encode(pixmap.encode_png()?);
+    let input = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><image x="2" y="2" width="16" height="16" href="data:image/png;base64,{encoded}"/></svg>"#
+    );
+    let options = ConversionOptions::builder()
+        .profile(ConversionProfile::Strict)
+        .build();
+    let result = convert(input.as_bytes(), &options)?;
+    assert_eq!(
+        result
+            .document
+            .elements()
+            .first()
+            .map(svg2excal_core::ExcalidrawElement::element_type),
+        Some("image")
+    );
+    assert!(result.report.diagnostics.is_empty());
     Ok(())
 }

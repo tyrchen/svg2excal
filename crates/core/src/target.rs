@@ -650,6 +650,12 @@ impl ExcalidrawElement {
         self.base().id.as_str()
     }
 
+    /// Deepest-to-shallowest deterministic target group memberships.
+    #[must_use]
+    pub fn group_ids(&self) -> &[GroupId] {
+        &self.base().group_ids
+    }
+
     /// Target element type string.
     #[must_use]
     pub const fn element_type(&self) -> &'static str {
@@ -680,6 +686,7 @@ pub enum ImageMimeType {
 pub struct BinaryFile {
     mime_type: ImageMimeType,
     id: FileId,
+    #[serde(rename = "dataURL")]
     data_url: String,
     created: u64,
     version: NonZeroU32,

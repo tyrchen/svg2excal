@@ -28,6 +28,8 @@ use crate::{
     },
 };
 
+const ANTIALIAS_MARGIN_PIXELS: f64 = 2.0;
+
 /// Converts SVG/SVGZ bytes without external I/O.
 ///
 /// # Errors
@@ -62,7 +64,7 @@ fn convert_internal(
 ) -> Result<ConversionResult, ConversionError> {
     let normalized = normalize(svg, options, resources)?;
     let scene_scale = scene_scale(&normalized, options)?;
-    let mut context = LoweringContext::new(options, &normalized, scene_scale);
+    let mut context = LoweringContext::new(options, &normalized, scene_scale)?;
     context.lower_group(normalized.tree.root(), 1.0)?;
     context.finalize_groups()?;
     if context.arrow_count > 0 {
@@ -190,6 +192,7 @@ struct LoweringContext<'a> {
     fallback_pixels: u64,
     embedded_bytes: usize,
     scene_scale: f64,
+    source_viewport: usvg::NonZeroRect,
 }
 
 impl<'a> LoweringContext<'a> {
@@ -197,7 +200,7 @@ impl<'a> LoweringContext<'a> {
         options: &'a ConversionOptions,
         normalized: &'a NormalizedInput,
         scene_scale: f64,
-    ) -> Self {
+    ) -> Result<Self, ConversionError> {
         let mut diagnostics = normalized.diagnostics.clone();
         if scene_scale < 1.0 {
             diagnostics.push(ConversionDiagnostic::new(
@@ -207,7 +210,7 @@ impl<'a> LoweringContext<'a> {
                 "scene was uniformly scaled to fit Excalidraw restoration bounds",
             ));
         }
-        Self {
+        Ok(Self {
             options,
             digest: &normalized.digest,
             source: &normalized.source,
@@ -229,7 +232,14 @@ impl<'a> LoweringContext<'a> {
             fallback_pixels: 0,
             embedded_bytes: 0,
             scene_scale,
-        }
+            source_viewport: usvg::NonZeroRect::from_xywh(
+                0.0,
+                0.0,
+                normalized.tree.size().width(),
+                normalized.tree.size().height(),
+            )
+            .ok_or(ConversionError::GeometryOverflow)?,
+        })
     }
 
     fn lower_group(
@@ -284,7 +294,14 @@ impl<'a> LoweringContext<'a> {
                         ));
                         self.lower_group(child, opacity)?;
                     } else {
-                        self.fallback_or_violation(node, "isolated SVG compositing group", None)?;
+                        let code = if child.mask().is_some() {
+                            Some(DiagnosticCode::MaskRasterized)
+                        } else if child.clip_path().is_some() {
+                            Some(DiagnosticCode::ClipRasterized)
+                        } else {
+                            None
+                        };
+                        self.fallback_or_violation(node, "isolated SVG compositing group", code)?;
                     }
                 }
                 usvg::Node::Group(child) => self.lower_group(child, opacity)?,
@@ -298,8 +315,19 @@ impl<'a> LoweringContext<'a> {
                 }
                 usvg::Node::Path(_) => {}
                 usvg::Node::Text(text) => self.lower_text(node, text, opacity)?,
-                usvg::Node::Image(_) => {
-                    self.fallback_or_violation(node, "source raster image", None)?;
+                usvg::Node::Image(image) => {
+                    if image_is_animated(image.kind()) {
+                        self.diagnostics.push(ConversionDiagnostic::new(
+                            DiagnosticCode::AnimatedImageSnapshot,
+                            DiagnosticSeverity::Fallback,
+                            self.source_order,
+                            "an animated source image was deterministically frozen to its first \
+                             frame",
+                        ));
+                        self.fallback_or_violation(node, "animated source raster image", None)?;
+                    } else {
+                        self.rasterize_source_image(node)?;
+                    }
                 }
             }
         }
@@ -451,7 +479,7 @@ impl<'a> LoweringContext<'a> {
                 ConversionProfile::Fidelity | ConversionProfile::Strict
             )
         {
-            self.fallback_or_violation(node, "curved path", Some(DiagnosticCode::PathFlattened))?;
+            self.fallback_or_violation(node, "curved path", None)?;
             return Ok(false);
         }
 
@@ -465,6 +493,11 @@ impl<'a> LoweringContext<'a> {
             return Ok(false);
         }
         if subpaths.len() > 1 && path.fill().is_some() {
+            if self.options.profile == ConversionProfile::Editable
+                && self.lower_editable_compound_fill(path, &subpaths, opacity)?
+            {
+                return Ok(false);
+            }
             self.fallback_or_violation(node, "compound filled path", None)?;
             return Ok(false);
         }
@@ -533,10 +566,19 @@ impl<'a> LoweringContext<'a> {
             return Ok(true);
         }
         if !path_has_only_solid_paint(path) || !stroke_transform_is_scalar(path) {
-            self.fallback_or_violation(node, "non-native path paint or stroke transform", None)?;
+            let code =
+                (!path_has_only_solid_paint(path)).then_some(DiagnosticCode::GradientRasterized);
+            self.fallback_or_violation(node, "non-native path paint or stroke transform", code)?;
             return Ok(true);
         }
         if path.stroke().is_some() && !stroke_is_exact_native(path) {
+            if matches!(
+                self.options.profile,
+                ConversionProfile::Fidelity | ConversionProfile::Strict
+            ) {
+                self.fallback_or_violation(node, "non-native stroke semantics", None)?;
+                return Ok(true);
+            }
             self.diagnostics.push(ConversionDiagnostic::new(
                 DiagnosticCode::StrokeStyleApproximated,
                 DiagnosticSeverity::Approximation,
@@ -603,6 +645,13 @@ impl<'a> LoweringContext<'a> {
             return Ok(true);
         }
         if radius_error > 1.0e-6 {
+            if matches!(
+                self.options.profile,
+                ConversionProfile::Fidelity | ConversionProfile::Strict
+            ) {
+                self.fallback_or_violation(node, "approximated rectangle corner radius", None)?;
+                return Ok(true);
+            }
             self.diagnostics.push(ConversionDiagnostic::new(
                 DiagnosticCode::CornerRadiusApproximated,
                 DiagnosticSeverity::Approximation,
@@ -663,6 +712,54 @@ impl<'a> LoweringContext<'a> {
             metadata.marker_end,
         ))?;
         self.arrow_count = self.arrow_count.saturating_add(1);
+        Ok(true)
+    }
+
+    fn lower_editable_compound_fill(
+        &mut self,
+        path: &usvg::Path,
+        subpaths: &[Subpath],
+        opacity: f64,
+    ) -> Result<bool, ConversionError> {
+        if path.stroke().is_some()
+            || subpaths.len() > self.options.limits.max_decomposition_elements()
+            || !compound_subpaths_are_disjoint(subpaths, self.options)
+        {
+            return Ok(false);
+        }
+        let added_points = subpaths.iter().try_fold(0_usize, |total, subpath| {
+            total.checked_add(subpath.points.len().saturating_add(1))
+        });
+        let Some(added_points) = added_points else {
+            return Ok(false);
+        };
+        if self
+            .elements
+            .len()
+            .checked_add(subpaths.len())
+            .is_none_or(|total| total > self.options.limits.max_target_elements())
+            || self
+                .target_points
+                .checked_add(added_points)
+                .is_none_or(|total| total > self.options.limits.max_target_points())
+        {
+            return Ok(false);
+        }
+        let group = GroupKey {
+            source_order: self.source_order,
+            instance: self.active_instances.last().copied().unwrap_or(0),
+        };
+        self.active_groups.push(group);
+        for subpath in subpaths {
+            self.lower_subpath(path, subpath, opacity)?;
+        }
+        self.active_groups.pop();
+        self.diagnostics.push(ConversionDiagnostic::new(
+            DiagnosticCode::CompoundPathDecomposed,
+            DiagnosticSeverity::Approximation,
+            self.source_order,
+            "a disjoint compound fill was decomposed into grouped editable polygons",
+        ));
         Ok(true)
     }
 
@@ -806,21 +903,8 @@ impl<'a> LoweringContext<'a> {
                 None,
             );
         }
-        if !is_exact_target_font(span) {
-            self.diagnostics.push(ConversionDiagnostic::new(
-                DiagnosticCode::FontSubstituted,
-                DiagnosticSeverity::Approximation,
-                self.source_order,
-                "source text style was mapped to target-compatible Liberation Sans",
-            ));
-        }
-        if !is_exact_target_font_style(span) {
-            self.diagnostics.push(ConversionDiagnostic::new(
-                DiagnosticCode::FontStyleApproximated,
-                DiagnosticSeverity::Approximation,
-                self.source_order,
-                "source font weight, style, stretch, or spacing was approximated",
-            ));
+        if !self.accept_text_font(node, span)? {
+            return Ok(());
         }
         let color = solid_fill_color(span.fill()).ok_or(ConversionError::NormalizationFailed {
             category: "text paint is not a solid color",
@@ -861,15 +945,47 @@ impl<'a> LoweringContext<'a> {
         ))
     }
 
+    fn accept_text_font(
+        &mut self,
+        node: &usvg::Node,
+        span: &usvg::TextSpan,
+    ) -> Result<bool, ConversionError> {
+        let exact_font = is_exact_target_font(span);
+        let exact_style = is_exact_target_font_style(span);
+        if (!exact_font || !exact_style)
+            && matches!(
+                self.options.profile,
+                ConversionProfile::Fidelity | ConversionProfile::Strict
+            )
+        {
+            self.fallback_or_violation(node, "non-native target font metrics", None)?;
+            return Ok(false);
+        }
+        if !exact_font {
+            self.diagnostics.push(ConversionDiagnostic::new(
+                DiagnosticCode::FontSubstituted,
+                DiagnosticSeverity::Approximation,
+                self.source_order,
+                "source text style was mapped to target-compatible Liberation Sans",
+            ));
+        }
+        if !exact_style {
+            self.diagnostics.push(ConversionDiagnostic::new(
+                DiagnosticCode::FontStyleApproximated,
+                DiagnosticSeverity::Approximation,
+                self.source_order,
+                "source font weight, style, stretch, or spacing was approximated",
+            ));
+        }
+        Ok(true)
+    }
+
     fn fallback_or_violation(
         &mut self,
         node: &usvg::Node,
         _reason: &'static str,
         strict_code: Option<DiagnosticCode>,
     ) -> Result<(), ConversionError> {
-        if node.abs_layer_bounding_box().is_none() {
-            return Ok(());
-        }
         if self.options.profile == ConversionProfile::Strict {
             self.diagnostics.push(ConversionDiagnostic::new(
                 strict_code.unwrap_or(DiagnosticCode::PaintIslandRasterized),
@@ -879,16 +995,26 @@ impl<'a> LoweringContext<'a> {
             ));
             return Ok(());
         }
-        self.rasterize_node(node)
+        if self.clipped_fallback_bounds(node).is_none() {
+            return Ok(());
+        }
+        self.rasterize_node(
+            node,
+            strict_code.unwrap_or(DiagnosticCode::PaintIslandRasterized),
+        )
     }
 
-    fn rasterize_node(&mut self, node: &usvg::Node) -> Result<(), ConversionError> {
-        let bbox = node
-            .abs_layer_bounding_box()
+    fn rasterize_node(
+        &mut self,
+        node: &usvg::Node,
+        diagnostic_code: DiagnosticCode,
+    ) -> Result<(), ConversionError> {
+        let scale = self.options.raster.fallback_scale() * self.scene_scale;
+        let bbox = self
+            .raster_bounds(node, scale)
             .ok_or(ConversionError::RasterizationFailed {
                 category: "empty fallback bounds",
             })?;
-        let scale = self.options.raster.fallback_scale() * self.scene_scale;
         let width = f64::from(bbox.width()) * scale;
         let height = f64::from(bbox.height()) * scale;
         let pixel_width = checked_pixel_extent(width)?;
@@ -906,21 +1032,85 @@ impl<'a> LoweringContext<'a> {
             },
         )?;
         let render_scale = raster_scale_to_f32(scale)?;
-        let render_transform = resvg::tiny_skia::Transform::from_scale(render_scale, render_scale);
-        resvg::render_node(node, render_transform, &mut pixmap.as_mut()).ok_or(
-            ConversionError::RasterizationFailed {
-                category: "fallback node is not renderable",
-            },
-        )?;
+        render_fallback_node(node, bbox, render_scale, &mut pixmap)?;
         let png = pixmap
             .encode_png()
             .map_err(|_| ConversionError::RasterizationFailed {
                 category: "PNG encoding",
             })?;
-        let file_id = FileId::new(file_id(&png)?);
+        self.emit_png(
+            bbox,
+            &png,
+            aggregate,
+            Some((diagnostic_code, raster_diagnostic_message(diagnostic_code))),
+        )
+    }
+
+    fn rasterize_source_image(&mut self, node: &usvg::Node) -> Result<(), ConversionError> {
+        let scale = self.options.raster.fallback_scale() * self.scene_scale;
+        let bbox = self
+            .raster_bounds(node, scale)
+            .ok_or(ConversionError::RasterizationFailed {
+                category: "empty source image bounds",
+            })?;
+        let pixel_width = checked_pixel_extent(f64::from(bbox.width()) * scale)?;
+        let pixel_height = checked_pixel_extent(f64::from(bbox.height()) * scale)?;
+        let pixels = u64::from(pixel_width)
+            .checked_mul(u64::from(pixel_height))
+            .ok_or(ConversionError::LimitExceeded {
+                resource: LimitResource::RasterPixels,
+                limit: self.options.limits.max_raster_pixels_per_island(),
+            })?;
+        let aggregate = self.reserve_fallback_pixels(pixels)?;
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(pixel_width, pixel_height).ok_or(
+            ConversionError::RasterizationFailed {
+                category: "invalid source image pixmap dimensions",
+            },
+        )?;
+        render_fallback_node(node, bbox, raster_scale_to_f32(scale)?, &mut pixmap)?;
+        let png = pixmap
+            .encode_png()
+            .map_err(|_| ConversionError::RasterizationFailed {
+                category: "PNG encoding",
+            })?;
+        self.emit_png(bbox, &png, aggregate, None)
+    }
+
+    fn clipped_fallback_bounds(&self, node: &usvg::Node) -> Option<usvg::NonZeroRect> {
+        fallback_bounds(node)?
+            .to_rect()
+            .intersect(&self.source_viewport.to_rect())?
+            .to_non_zero_rect()
+    }
+
+    fn raster_bounds(&self, node: &usvg::Node, scale: f64) -> Option<usvg::NonZeroRect> {
+        let clipped = self.clipped_fallback_bounds(node)?;
+        let viewport = self.source_viewport;
+        let left = ((f64::from(clipped.left()) * scale).floor() - ANTIALIAS_MARGIN_PIXELS) / scale;
+        let top = ((f64::from(clipped.top()) * scale).floor() - ANTIALIAS_MARGIN_PIXELS) / scale;
+        let right = ((f64::from(clipped.right()) * scale).ceil() + ANTIALIAS_MARGIN_PIXELS) / scale;
+        let bottom =
+            ((f64::from(clipped.bottom()) * scale).ceil() + ANTIALIAS_MARGIN_PIXELS) / scale;
+        let x = left.max(f64::from(viewport.left()));
+        let y = top.max(f64::from(viewport.top()));
+        let bounded_right = right.min(f64::from(viewport.right()));
+        let bounded_bottom = bottom.min(f64::from(viewport.bottom()));
+        let width = finite_f32(bounded_right - x)?;
+        let height = finite_f32(bounded_bottom - y)?;
+        usvg::NonZeroRect::from_xywh(finite_f32(x)?, finite_f32(y)?, width, height)
+    }
+
+    fn emit_png(
+        &mut self,
+        bbox: usvg::NonZeroRect,
+        png: &[u8],
+        aggregate_pixels: u64,
+        diagnostic: Option<(DiagnosticCode, &'static str)>,
+    ) -> Result<(), ConversionError> {
+        let file_id = FileId::new(file_id(png)?);
         let data_url = format!(
             "data:image/png;base64,{}",
-            base64::engine::general_purpose::STANDARD.encode(&png)
+            base64::engine::general_purpose::STANDARD.encode(png)
         );
         let additional_bytes = if self.files.contains_key(&file_id) {
             0
@@ -949,17 +1139,19 @@ impl<'a> LoweringContext<'a> {
             .entry(file_id.clone())
             .or_insert_with(|| BinaryFile::png(file_id.clone(), data_url));
         self.push_element(ExcalidrawElement::image(base, file_id))?;
-        self.fallback_pixels = aggregate;
+        self.fallback_pixels = aggregate_pixels;
         self.embedded_bytes = new_embedded;
-        self.diagnostics.push(
-            ConversionDiagnostic::new(
-                DiagnosticCode::PaintIslandRasterized,
-                DiagnosticSeverity::Fallback,
-                self.source_order,
-                "smallest complete unsupported paint island was rasterized",
-            )
-            .with_target(&element_id),
-        );
+        if let Some((diagnostic_code, message)) = diagnostic {
+            self.diagnostics.push(
+                ConversionDiagnostic::new(
+                    diagnostic_code,
+                    DiagnosticSeverity::Fallback,
+                    self.source_order,
+                    message,
+                )
+                .with_target(&element_id),
+            );
+        }
         Ok(())
     }
 
@@ -1193,6 +1385,317 @@ fn adaptive_target_radius(minimum_dimension: f64, configured_radius: f64) -> f64
         minimum_dimension * PROPORTIONAL_RADIUS
     } else {
         configured_radius
+    }
+}
+
+fn compound_subpaths_are_disjoint(subpaths: &[Subpath], options: &ConversionOptions) -> bool {
+    if subpaths.iter().any(|subpath| {
+        subpath.points.len() < 3
+            || points_are_collinear(&subpath.points)
+            || !is_simple_fill_boundary(subpath, options)
+    }) {
+        return false;
+    }
+    let mut work = 0_usize;
+    for (left_index, left) in subpaths.iter().enumerate() {
+        for right in subpaths.iter().skip(left_index.saturating_add(1)) {
+            let Some(pair_work) = left.points.len().checked_mul(right.points.len()) else {
+                return false;
+            };
+            let Some(next_work) = work.checked_add(pair_work) else {
+                return false;
+            };
+            if next_work > options.limits.max_path_segments() {
+                return false;
+            }
+            work = next_work;
+        }
+    }
+    for (left_index, left) in subpaths.iter().enumerate() {
+        for right in subpaths.iter().skip(left_index.saturating_add(1)) {
+            if polygons_intersect_or_contain(&left.points, &right.points) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn polygons_intersect_or_contain(left: &[Point], right: &[Point]) -> bool {
+    let Some(left_first) = left.first().copied() else {
+        return true;
+    };
+    let Some(right_first) = right.first().copied() else {
+        return true;
+    };
+    let left_edges = polygon_edges(left);
+    let right_edges = polygon_edges(right);
+    left_edges.iter().any(|(left_start, left_end)| {
+        right_edges.iter().any(|(right_start, right_end)| {
+            segments_intersect(*left_start, *left_end, *right_start, *right_end)
+        })
+    }) || point_in_polygon(left_first, right)
+        || point_in_polygon(right_first, left)
+}
+
+fn polygon_edges(points: &[Point]) -> Vec<(Point, Point)> {
+    let Some(last) = points.last().copied() else {
+        return Vec::new();
+    };
+    points
+        .windows(2)
+        .filter_map(|pair| Some((*pair.first()?, *pair.get(1)?)))
+        .chain(points.first().copied().map(|first| (last, first)))
+        .collect()
+}
+
+fn point_in_polygon(point: Point, polygon: &[Point]) -> bool {
+    polygon_edges(polygon)
+        .into_iter()
+        .fold(false, |inside, (start, end)| {
+            let crosses = (start.y > point.y) != (end.y > point.y)
+                && point.x < (end.x - start.x) * (point.y - start.y) / (end.y - start.y) + start.x;
+            inside != crosses
+        })
+}
+
+fn raster_diagnostic_message(code: DiagnosticCode) -> &'static str {
+    match code {
+        DiagnosticCode::GradientRasterized => "a gradient or pattern paint island was rasterized",
+        DiagnosticCode::MaskRasterized => "a complete masked paint island was rasterized",
+        DiagnosticCode::ClipRasterized => "a complete clipped paint island was rasterized",
+        _ => "smallest complete unsupported paint island was rasterized",
+    }
+}
+
+fn fallback_bounds(node: &usvg::Node) -> Option<usvg::NonZeroRect> {
+    node.abs_layer_bounding_box().or_else(|| match node {
+        usvg::Node::Path(path) if path.stroke().is_some() => {
+            path.abs_stroke_bounding_box().to_non_zero_rect()
+        }
+        usvg::Node::Text(text) => text.abs_stroke_bounding_box().to_non_zero_rect(),
+        usvg::Node::Group(_) | usvg::Node::Path(_) | usvg::Node::Image(_) => None,
+    })
+}
+
+fn render_fallback_node(
+    node: &usvg::Node,
+    bbox: usvg::NonZeroRect,
+    scale: f32,
+    pixmap: &mut resvg::tiny_skia::Pixmap,
+) -> Result<(), ConversionError> {
+    let render_transform = resvg::tiny_skia::Transform::from_scale(scale, scale);
+    let is_zero_area_path = matches!(
+        node,
+        usvg::Node::Path(path)
+            if path.data().bounds().width() == 0.0 || path.data().bounds().height() == 0.0
+    );
+    if let Some(original_bbox) = node.abs_layer_bounding_box()
+        && !is_zero_area_path
+    {
+        let adjusted_transform = render_transform
+            .pre_translate(original_bbox.x() - bbox.x(), original_bbox.y() - bbox.y());
+        return resvg::render_node(node, adjusted_transform, &mut pixmap.as_mut()).ok_or(
+            ConversionError::RasterizationFailed {
+                category: "fallback node is not renderable",
+            },
+        );
+    }
+    let usvg::Node::Path(path) = node else {
+        return Err(ConversionError::RasterizationFailed {
+            category: "zero-area fallback node is not a stroked path",
+        });
+    };
+    let Some(stroke) = path.stroke() else {
+        return Err(ConversionError::RasterizationFailed {
+            category: "zero-area fallback path has no stroke",
+        });
+    };
+    let usvg::Paint::Color(color) = stroke.paint() else {
+        return Err(ConversionError::RasterizationFailed {
+            category: "zero-area fallback path has non-solid stroke paint",
+        });
+    };
+    let mut paint = resvg::tiny_skia::Paint::default();
+    paint.set_color_rgba8(color.red, color.green, color.blue, stroke.opacity().to_u8());
+    paint.anti_alias = path.rendering_mode().use_shape_antialiasing();
+    let absolute = path.abs_transform();
+    let transform = Transform::from_row(
+        scale * absolute.sx,
+        scale * absolute.ky,
+        scale * absolute.kx,
+        scale * absolute.sy,
+        scale * (absolute.tx - bbox.x()),
+        scale * (absolute.ty - bbox.y()),
+    );
+    pixmap
+        .as_mut()
+        .stroke_path(path.data(), &paint, &stroke.to_tiny_skia(), transform, None);
+    Ok(())
+}
+
+fn image_is_animated(kind: &usvg::ImageKind) -> bool {
+    match kind {
+        usvg::ImageKind::GIF(bytes) => gif_frame_count(bytes) > 1,
+        usvg::ImageKind::PNG(bytes) => png_has_animation_control(bytes),
+        usvg::ImageKind::WEBP(bytes) => webp_has_animation(bytes),
+        usvg::ImageKind::JPEG(_) | usvg::ImageKind::SVG(_) => false,
+    }
+}
+
+fn gif_frame_count(bytes: &[u8]) -> usize {
+    if !bytes.starts_with(b"GIF87a") && !bytes.starts_with(b"GIF89a") {
+        return 0;
+    }
+    let Some(packed) = bytes.get(10).copied() else {
+        return 0;
+    };
+    let global_table_bytes = if packed & 0x80 == 0 {
+        0
+    } else {
+        3_usize.saturating_mul(1_usize << (usize::from(packed & 0x07) + 1))
+    };
+    let Some(mut position) = 13_usize.checked_add(global_table_bytes) else {
+        return 0;
+    };
+    let mut frames = 0_usize;
+    while let Some(introducer) = bytes.get(position).copied() {
+        match introducer {
+            0x2c => {
+                frames = frames.saturating_add(1);
+                if frames > 1 {
+                    return frames;
+                }
+                let Some(local_packed_position) = position.checked_add(9) else {
+                    return 0;
+                };
+                let Some(local_packed) = bytes.get(local_packed_position).copied() else {
+                    return 0;
+                };
+                let local_table_bytes = if local_packed & 0x80 == 0 {
+                    0
+                } else {
+                    3_usize.saturating_mul(1_usize << (usize::from(local_packed & 0x07) + 1))
+                };
+                let Some(data_start) = position
+                    .checked_add(11)
+                    .and_then(|value| value.checked_add(local_table_bytes))
+                else {
+                    return 0;
+                };
+                position = data_start;
+                if !skip_image_sub_blocks(bytes, &mut position) {
+                    return 0;
+                }
+            }
+            0x21 => {
+                let Some(block_start) = position.checked_add(2) else {
+                    return 0;
+                };
+                position = block_start;
+                if !skip_image_sub_blocks(bytes, &mut position) {
+                    return 0;
+                }
+            }
+            0x3b => return frames,
+            _ => return 0,
+        }
+    }
+    0
+}
+
+fn png_has_animation_control(bytes: &[u8]) -> bool {
+    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return false;
+    }
+    let mut position = 8_usize;
+    while let Some(header_end) = position.checked_add(8) {
+        let Some(header) = bytes.get(position..header_end) else {
+            return false;
+        };
+        let Some(length_bytes) = header.get(..4) else {
+            return false;
+        };
+        let Ok(length_bytes) = <[u8; 4]>::try_from(length_bytes) else {
+            return false;
+        };
+        let Ok(length) = usize::try_from(u32::from_be_bytes(length_bytes)) else {
+            return false;
+        };
+        let Some(kind) = header.get(4..8) else {
+            return false;
+        };
+        if kind == b"acTL" {
+            return true;
+        }
+        let Some(next) = header_end
+            .checked_add(length)
+            .and_then(|value| value.checked_add(4))
+        else {
+            return false;
+        };
+        if next > bytes.len() || kind == b"IEND" {
+            return false;
+        }
+        position = next;
+    }
+    false
+}
+
+fn webp_has_animation(bytes: &[u8]) -> bool {
+    if !bytes.starts_with(b"RIFF") || bytes.get(8..12) != Some(b"WEBP".as_slice()) {
+        return false;
+    }
+    let mut position = 12_usize;
+    while let Some(header_end) = position.checked_add(8) {
+        let Some(header) = bytes.get(position..header_end) else {
+            return false;
+        };
+        let Some(kind) = header.get(..4) else {
+            return false;
+        };
+        if kind == b"ANIM" || kind == b"ANMF" {
+            return true;
+        }
+        let Some(length_bytes) = header.get(4..8) else {
+            return false;
+        };
+        let Ok(length_bytes) = <[u8; 4]>::try_from(length_bytes) else {
+            return false;
+        };
+        let Ok(length) = usize::try_from(u32::from_le_bytes(length_bytes)) else {
+            return false;
+        };
+        let padded_length = length.saturating_add(length & 1);
+        let Some(next) = header_end.checked_add(padded_length) else {
+            return false;
+        };
+        if next > bytes.len() {
+            return false;
+        }
+        position = next;
+    }
+    false
+}
+
+fn skip_image_sub_blocks(bytes: &[u8], position: &mut usize) -> bool {
+    loop {
+        let Some(length) = bytes.get(*position).copied().map(usize::from) else {
+            return false;
+        };
+        let Some(data_start) = (*position).checked_add(1) else {
+            return false;
+        };
+        let Some(next) = data_start.checked_add(length) else {
+            return false;
+        };
+        if next > bytes.len() {
+            return false;
+        }
+        *position = next;
+        if length == 0 {
+            return true;
+        }
     }
 }
 
@@ -1770,6 +2273,11 @@ fn raster_scale_to_f32(value: f64) -> Result<f32, ConversionError> {
     Ok(value as f32)
 }
 
+#[allow(clippy::cast_possible_truncation)]
+fn finite_f32(value: f64) -> Option<f32> {
+    (value.is_finite() && value.abs() <= f64::from(f32::MAX)).then_some(value as f32)
+}
+
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn bounded_percent_to_u8(value: f64) -> u8 {
     debug_assert!((0.0..=100.0).contains(&value));
@@ -1790,7 +2298,9 @@ fn usize_to_u64(value: usize) -> u64 {
 mod tests {
     use proptest::prelude::*;
 
-    use super::{Point, flatten_cubic};
+    use super::{
+        Point, flatten_cubic, gif_frame_count, png_has_animation_control, webp_has_animation,
+    };
     use crate::{ConversionOptions, convert};
 
     #[test]
@@ -1808,6 +2318,35 @@ mod tests {
         );
         assert_eq!(first.document.elements().len(), 3);
         Ok(())
+    }
+
+    #[test]
+    fn test_should_detect_animation_only_from_valid_container_chunks() {
+        let mut gif = b"GIF89a".to_vec();
+        gif.extend_from_slice(&[1, 0, 1, 0, 0, 0, 0]);
+        for _ in 0..2 {
+            gif.push(0x2c);
+            gif.extend_from_slice(&[0; 9]);
+            gif.extend_from_slice(&[2, 1, 0, 0]);
+        }
+        gif.push(0x3b);
+        assert_eq!(gif_frame_count(&gif), 2);
+        assert_eq!(gif_frame_count(b"GIF89a,not-a-valid-image"), 0);
+
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend_from_slice(&[0, 0, 0, 0]);
+        png.extend_from_slice(b"acTL");
+        png.extend_from_slice(&[0, 0, 0, 0]);
+        assert!(png_has_animation_control(&png));
+        assert!(!png_has_animation_control(
+            b"\x89PNG\r\n\x1a\ncompressed-acTL"
+        ));
+
+        let mut webp = b"RIFF\0\0\0\0WEBP".to_vec();
+        webp.extend_from_slice(b"ANIM");
+        webp.extend_from_slice(&[0, 0, 0, 0]);
+        assert!(webp_has_animation(&webp));
+        assert!(!webp_has_animation(b"RIFF\0\0\0\0WEBPcompressed-ANIM"));
     }
 
     proptest! {

@@ -26,6 +26,8 @@ pub enum DiagnosticSeverity {
 pub enum DiagnosticCode {
     /// A curve was flattened within its error budget.
     PathFlattened,
+    /// A compound fill was decomposed into grouped editable polygons.
+    CompoundPathDecomposed,
     /// A paint island was rasterized.
     PaintIslandRasterized,
     /// A recognized non-structural filter was omitted.

@@ -39,6 +39,26 @@ pub(crate) struct SourceCensus {
     pub(crate) references: usize,
     pub(crate) active_content: usize,
     pub(crate) external_references: Vec<String>,
+    pub(crate) nested_svg_data_images: usize,
+}
+
+#[derive(Clone)]
+enum ResolvedImage {
+    Raster(Box<usvg::ImageKind>),
+    NestedSvg(Box<usvg::Tree>),
+}
+
+#[derive(Clone, Default)]
+struct ResolvedImages {
+    external: BTreeMap<String, ResolvedImage>,
+    data: BTreeMap<String, ResolvedImage>,
+}
+
+#[derive(Default)]
+struct ResourceBudget {
+    decoded_bytes: usize,
+    xml_elements: usize,
+    references: usize,
 }
 
 #[derive(Debug)]
@@ -90,8 +110,22 @@ pub(crate) fn normalize(
         .map_err(|error| sanitize_xml_error(&error))?;
     validate_root(&document)?;
     let census = census(&document, options)?;
+    if census.nested_svg_data_images > 0 && !options.raster.allow_nested_svg() {
+        return Err(ConversionError::ResourceDenied { kind: "nested-svg" });
+    }
     let prepared = prepare_source(text, &document, &options.limits)?;
-    let resolved = resolve_external_images(&census.external_references, options, resources)?;
+    let mut resource_budget = ResourceBudget {
+        decoded_bytes: 0,
+        xml_elements: census.elements,
+        references: census.references,
+    };
+    let resolved = resolve_images(
+        &document,
+        &census.external_references,
+        options,
+        resources,
+        &mut resource_budget,
+    )?;
     let usvg_options = deterministic_usvg_options(options, &resolved);
     let instrumented = usvg::roxmltree::Document::parse_with_options(
         &prepared.xml,
@@ -202,6 +236,7 @@ fn census(
     let mut total_text_bytes = 0_usize;
     let mut references = 0_usize;
     let mut active_content = 0_usize;
+    let mut nested_svg_data_images = 0_usize;
     let mut external_references = Vec::new();
     let mut external_seen = BTreeSet::new();
 
@@ -248,6 +283,9 @@ fn census(
                     active_content = active_content.saturating_add(1);
                 }
                 if is_reference_attribute(node.tag_name().name(), attribute.name()) {
+                    if is_nested_svg_data_image(node.tag_name().name(), attribute.value()) {
+                        nested_svg_data_images = nested_svg_data_images.saturating_add(1);
+                    }
                     classify_reference(
                         value,
                         limits,
@@ -267,22 +305,14 @@ fn census(
                 }
             }
         } else if node.is_text() {
-            let text = node.text().unwrap_or_default();
-            validate_lexical_value(text, limits, &mut total_text_bytes)?;
-            if node
-                .parent_element()
-                .is_some_and(|parent| parent.tag_name().name() == "style")
-            {
-                for reference in css_urls(text).chain(css_imports(text)) {
-                    classify_reference(
-                        reference,
-                        limits,
-                        &mut references,
-                        &mut external_references,
-                        &mut external_seen,
-                    )?;
-                }
-            }
+            census_text_node(
+                node,
+                limits,
+                &mut total_text_bytes,
+                &mut references,
+                &mut external_references,
+                &mut external_seen,
+            )?;
         }
     }
     if references > limits.max_references() {
@@ -295,7 +325,43 @@ fn census(
         references,
         active_content,
         external_references,
+        nested_svg_data_images,
     })
+}
+
+fn census_text_node(
+    node: usvg::roxmltree::Node<'_, '_>,
+    limits: &crate::ConversionLimits,
+    total_text_bytes: &mut usize,
+    references: &mut usize,
+    external_references: &mut Vec<String>,
+    external_seen: &mut BTreeSet<String>,
+) -> Result<(), ConversionError> {
+    let text = node.text().unwrap_or_default();
+    validate_lexical_value(text, limits, total_text_bytes)?;
+    if node
+        .parent_element()
+        .is_some_and(|parent| parent.tag_name().name() == "style")
+    {
+        for reference in css_urls(text).chain(css_imports(text)) {
+            classify_reference(
+                reference,
+                limits,
+                references,
+                external_references,
+                external_seen,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn is_nested_svg_data_image(element_name: &str, reference: &str) -> bool {
+    element_name == "image"
+        && reference
+            .trim()
+            .to_ascii_lowercase()
+            .starts_with("data:image/svg+xml")
 }
 
 fn validate_lexical_value(
@@ -483,20 +549,22 @@ fn validate_reference_depth(
     Ok(())
 }
 
-fn resolve_external_images(
+fn resolve_images(
+    document: &usvg::roxmltree::Document<'_>,
     references: &[String],
     options: &ConversionOptions,
     resources: Option<&ResourceContext<'_>>,
-) -> Result<Arc<BTreeMap<String, usvg::ImageKind>>, ConversionError> {
+    budget: &mut ResourceBudget,
+) -> Result<Arc<ResolvedImages>, ConversionError> {
+    let mut resolved = ResolvedImages::default();
+    prevalidate_data_images(document, options, 1, budget, &mut resolved.data)?;
     if references.is_empty() {
-        return Ok(Arc::new(BTreeMap::new()));
+        return Ok(Arc::new(resolved));
     }
     let context = resources.ok_or(ConversionError::ResourceDenied {
         kind: "path-or-url",
     })?;
     let ProvidedResourcePolicy::RelativeFiles(policy) = &context.policy;
-    let mut total_bytes = 0_usize;
-    let mut resolved = BTreeMap::new();
     for reference in references {
         let request = ResourceRequest::parse(reference, policy).map_err(|_| {
             ConversionError::ResourceDenied {
@@ -510,33 +578,211 @@ fn resolve_external_images(
                 .map_err(|_| ConversionError::NormalizationFailed {
                     category: "resource provider failed",
                 })?;
-        if resource.bytes().len() > options.limits.max_resource_bytes() {
-            return Err(limit(
-                LimitResource::EmbeddedBytes,
-                options.limits.max_resource_bytes(),
-            ));
-        }
-        total_bytes = total_bytes
-            .checked_add(resource.bytes().len())
-            .ok_or_else(|| {
-                limit(
-                    LimitResource::EmbeddedBytes,
-                    options.limits.max_resource_bytes_total(),
-                )
-            })?;
-        if total_bytes > options.limits.max_resource_bytes_total() {
-            return Err(limit(
-                LimitResource::EmbeddedBytes,
-                options.limits.max_resource_bytes_total(),
-            ));
-        }
-        let kind = checked_image_kind(resource.mime_type(), resource.bytes())?;
-        resolved.insert(reference.clone(), kind);
+        reserve_resource_bytes(resource.bytes().len(), options, budget)?;
+        let kind = if resource.mime_type() == "image/svg+xml" {
+            if !options.raster.allow_nested_svg() {
+                return Err(ConversionError::ResourceDenied { kind: "nested-svg" });
+            }
+            ResolvedImage::NestedSvg(Box::new(parse_nested_svg(
+                resource.bytes(),
+                options,
+                1,
+                budget,
+            )?))
+        } else {
+            ResolvedImage::Raster(Box::new(checked_image_kind(
+                resource.mime_type(),
+                resource.bytes(),
+                options,
+            )?))
+        };
+        resolved.external.insert(reference.clone(), kind);
     }
     Ok(Arc::new(resolved))
 }
 
-fn checked_image_kind(mime: &str, bytes: &[u8]) -> Result<usvg::ImageKind, ConversionError> {
+fn parse_nested_svg(
+    bytes: &[u8],
+    options: &ConversionOptions,
+    depth: usize,
+    budget: &mut ResourceBudget,
+) -> Result<usvg::Tree, ConversionError> {
+    const MAX_NESTED_SVG_DEPTH: usize = 8;
+    if depth > MAX_NESTED_SVG_DEPTH {
+        return Err(limit(LimitResource::References, MAX_NESTED_SVG_DEPTH));
+    }
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| ConversionError::InputRejected(InputRejection::InvalidUtf8))?;
+    reject_prohibited_declarations(text)?;
+    reject_illegal_controls(text)?;
+    let document = usvg::roxmltree::Document::parse_with_options(
+        text,
+        usvg::roxmltree::ParsingOptions {
+            allow_dtd: false,
+            ..Default::default()
+        },
+    )
+    .map_err(|error| sanitize_xml_error(&error))?;
+    validate_root(&document)?;
+    let nested_census = census(&document, options)?;
+    if !nested_census.external_references.is_empty() {
+        return Err(ConversionError::ResourceDenied {
+            kind: "nested-external-resource",
+        });
+    }
+    budget.xml_elements = budget
+        .xml_elements
+        .checked_add(nested_census.elements)
+        .ok_or_else(|| {
+            limit(
+                LimitResource::XmlElements,
+                options.limits.max_xml_elements(),
+            )
+        })?;
+    if budget.xml_elements > options.limits.max_xml_elements() {
+        return Err(limit(
+            LimitResource::XmlElements,
+            options.limits.max_xml_elements(),
+        ));
+    }
+    budget.references = budget
+        .references
+        .checked_add(nested_census.references)
+        .ok_or_else(|| limit(LimitResource::References, options.limits.max_references()))?;
+    if budget.references > options.limits.max_references() {
+        return Err(limit(
+            LimitResource::References,
+            options.limits.max_references(),
+        ));
+    }
+    let mut resolved = ResolvedImages::default();
+    prevalidate_data_images(
+        &document,
+        options,
+        depth.saturating_add(1),
+        budget,
+        &mut resolved.data,
+    )?;
+    let usvg_options = deterministic_usvg_options(options, &Arc::new(resolved));
+    usvg::Tree::from_xmltree(&document, &usvg_options)
+        .map_err(|error| sanitize_normalization_error(&error))
+}
+
+fn prevalidate_data_images(
+    document: &usvg::roxmltree::Document<'_>,
+    options: &ConversionOptions,
+    nested_depth: usize,
+    budget: &mut ResourceBudget,
+    output: &mut BTreeMap<String, ResolvedImage>,
+) -> Result<(), ConversionError> {
+    for node in document
+        .descendants()
+        .filter(usvg::roxmltree::Node::is_element)
+    {
+        if node.tag_name().name() != "image" {
+            continue;
+        }
+        for attribute in node
+            .attributes()
+            .filter(|attribute| attribute.name() == "href")
+        {
+            let value = attribute.value().trim();
+            if !value.to_ascii_lowercase().starts_with("data:") {
+                continue;
+            }
+            let data_url = data_url::DataUrl::process(value).map_err(|_| {
+                ConversionError::NormalizationFailed {
+                    category: "malformed image data URL",
+                }
+            })?;
+            let (bytes, _) =
+                data_url
+                    .decode_to_vec()
+                    .map_err(|_| ConversionError::NormalizationFailed {
+                        category: "malformed image data URL body",
+                    })?;
+            reserve_resource_bytes(bytes.len(), options, budget)?;
+            let image = if data_url.mime_type().matches("image", "svg+xml") {
+                if !options.raster.allow_nested_svg() {
+                    return Err(ConversionError::ResourceDenied { kind: "nested-svg" });
+                }
+                ResolvedImage::NestedSvg(Box::new(parse_nested_svg(
+                    &bytes,
+                    options,
+                    nested_depth,
+                    budget,
+                )?))
+            } else {
+                let mime = if data_url.mime_type().matches("image", "png") {
+                    "image/png"
+                } else if data_url.mime_type().matches("image", "jpeg") {
+                    "image/jpeg"
+                } else if data_url.mime_type().matches("image", "gif") {
+                    "image/gif"
+                } else if data_url.mime_type().matches("image", "webp") {
+                    "image/webp"
+                } else {
+                    return Err(ConversionError::ResourceDenied {
+                        kind: "image-data-mime",
+                    });
+                };
+                ResolvedImage::Raster(Box::new(checked_image_kind(mime, &bytes, options)?))
+            };
+            output.insert(image_digest(&bytes), image);
+        }
+    }
+    Ok(())
+}
+
+fn reserve_resource_bytes(
+    bytes: usize,
+    options: &ConversionOptions,
+    budget: &mut ResourceBudget,
+) -> Result<(), ConversionError> {
+    if bytes > options.limits.max_resource_bytes() {
+        return Err(limit(
+            LimitResource::EmbeddedBytes,
+            options.limits.max_resource_bytes(),
+        ));
+    }
+    budget.decoded_bytes = budget.decoded_bytes.checked_add(bytes).ok_or_else(|| {
+        limit(
+            LimitResource::EmbeddedBytes,
+            options.limits.max_resource_bytes_total(),
+        )
+    })?;
+    if budget.decoded_bytes > options.limits.max_resource_bytes_total() {
+        return Err(limit(
+            LimitResource::EmbeddedBytes,
+            options.limits.max_resource_bytes_total(),
+        ));
+    }
+    Ok(())
+}
+
+fn checked_image_kind(
+    mime: &str,
+    bytes: &[u8],
+    options: &ConversionOptions,
+) -> Result<usvg::ImageKind, ConversionError> {
+    let dimensions =
+        imagesize::blob_size(bytes).map_err(|_| ConversionError::NormalizationFailed {
+            category: "invalid raster image header",
+        })?;
+    let pixels = u64::try_from(dimensions.width)
+        .ok()
+        .and_then(|width| {
+            u64::try_from(dimensions.height)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        })
+        .ok_or(ConversionError::GeometryOverflow)?;
+    if pixels > options.limits.max_raster_pixels_per_island() {
+        return Err(ConversionError::LimitExceeded {
+            resource: LimitResource::RasterPixels,
+            limit: options.limits.max_raster_pixels_per_island(),
+        });
+    }
     let data = Arc::new(bytes.to_vec());
     match mime {
         "image/png" if bytes.starts_with(b"\x89PNG\r\n\x1a\n") => Ok(usvg::ImageKind::PNG(data)),
@@ -558,9 +804,10 @@ fn checked_image_kind(mime: &str, bytes: &[u8]) -> Result<usvg::ImageKind, Conve
 
 fn deterministic_usvg_options(
     options: &ConversionOptions,
-    resolved: &Arc<BTreeMap<String, usvg::ImageKind>>,
+    resolved: &Arc<ResolvedImages>,
 ) -> usvg::Options<'static> {
     let max_resource_bytes = options.limits.max_resource_bytes();
+    let data_store = Arc::clone(resolved);
     let string_store = Arc::clone(resolved);
     let mut usvg_options = usvg::Options {
         resources_dir: None,
@@ -576,15 +823,33 @@ fn deterministic_usvg_options(
         fontdb.set_sans_serif_family("Liberation Sans");
     }
     usvg_options.image_href_resolver = usvg::ImageHrefResolver {
-        resolve_data: Box::new(move |mime, data, _| {
+        resolve_data: Box::new(move |_mime, data, _nested_options| {
             if data.len() > max_resource_bytes {
                 return None;
             }
-            checked_image_kind(mime, data.as_slice()).ok()
+            match data_store.data.get(&image_digest(data.as_slice())) {
+                Some(ResolvedImage::Raster(image)) => Some((**image).clone()),
+                Some(ResolvedImage::NestedSvg(tree)) => {
+                    Some(usvg::ImageKind::SVG((**tree).clone()))
+                }
+                None => None,
+            }
         }),
-        resolve_string: Box::new(move |href, _| string_store.get(href).cloned()),
+        resolve_string: Box::new(move |href, _nested_options| {
+            match string_store.external.get(href) {
+                Some(ResolvedImage::Raster(image)) => Some((**image).clone()),
+                Some(ResolvedImage::NestedSvg(tree)) => {
+                    Some(usvg::ImageKind::SVG((**tree).clone()))
+                }
+                None => None,
+            }
+        }),
     };
     usvg_options
+}
+
+fn image_digest(bytes: &[u8]) -> String {
+    blake3::hash(bytes).to_hex().to_string()
 }
 
 fn count_paint_nodes(group: &usvg::Group, limit_value: usize) -> Result<usize, ConversionError> {
@@ -600,6 +865,10 @@ fn count_paint_nodes(group: &usvg::Group, limit_value: usize) -> Result<usize, C
             }
             if let usvg::Node::Group(child) = node {
                 stack.push(child);
+            } else if let usvg::Node::Image(image) = node
+                && let usvg::ImageKind::SVG(tree) = image.kind()
+            {
+                stack.push(tree.root());
             }
         }
     }

@@ -3,7 +3,7 @@
 use base64::Engine as _;
 use svg2excal_core::{
     ConversionError, ConversionLimits, ConversionOptions, ExcalidrawDocument, InputRejection,
-    LimitResource, ProvenanceMode, convert,
+    LimitResource, ProvenanceMode, RasterOptions, convert,
 };
 
 #[test]
@@ -52,6 +52,57 @@ fn test_should_sanitize_malformed_xml_error() {
     let rendered = format!("{result:?}");
     assert!(!rendered.contains("credential"));
     assert!(matches!(result, Err(ConversionError::MalformedXml { .. })));
+}
+
+#[test]
+fn test_should_reject_raster_image_dimension_bomb_before_normalization()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(2, 2)
+        .ok_or_else(|| std::io::Error::other("invalid test pixmap"))?;
+    pixmap.fill(resvg::tiny_skia::Color::from_rgba8(0, 0, 0, 255));
+    let mut png = pixmap.encode_png()?;
+    png.get_mut(16..20)
+        .ok_or_else(|| std::io::Error::other("missing PNG width"))?
+        .copy_from_slice(&100_000_u32.to_be_bytes());
+    png.get_mut(20..24)
+        .ok_or_else(|| std::io::Error::other("missing PNG height"))?
+        .copy_from_slice(&100_000_u32.to_be_bytes());
+    let encoded = base64::engine::general_purpose::STANDARD.encode(png);
+    let input = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><image width="20" height="20" href="data:image/png;base64,{encoded}"/></svg>"#
+    );
+    assert!(matches!(
+        convert(input.as_bytes(), &ConversionOptions::default()),
+        Err(ConversionError::LimitExceeded {
+            resource: LimitResource::RasterPixels,
+            ..
+        })
+    ));
+    Ok(())
+}
+
+#[test]
+fn test_should_reject_nested_svg_past_recursive_depth_budget()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut nested =
+        br##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1" fill="#000"/></svg>"##.to_vec();
+    for _ in 0..9 {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&nested);
+        nested = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><image width="1" height="1" href="data:image/svg+xml;base64,{encoded}"/></svg>"#
+        )
+        .into_bytes();
+    }
+    let raster = RasterOptions::try_new(2.0, true)?;
+    let options = ConversionOptions::builder().raster(raster).build();
+    assert!(matches!(
+        convert(&nested, &options),
+        Err(ConversionError::LimitExceeded {
+            resource: LimitResource::References,
+            limit: 8
+        })
+    ));
+    Ok(())
 }
 
 #[test]
@@ -251,7 +302,7 @@ fn test_should_reject_non_content_addressed_png_on_import() -> Result<(), Box<dy
         .and_then(serde_json::Value::as_object_mut)
         .ok_or_else(|| std::io::Error::other("missing file"))?;
     let data_url = file
-        .get("dataUrl")
+        .get("dataURL")
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| std::io::Error::other("missing data URL"))?;
     let encoded = data_url
@@ -260,7 +311,7 @@ fn test_should_reject_non_content_addressed_png_on_import() -> Result<(), Box<dy
     let mut bytes = base64::engine::general_purpose::STANDARD.decode(encoded)?;
     bytes.push(0);
     file.insert(
-        "dataUrl".to_owned(),
+        "dataURL".to_owned(),
         serde_json::Value::from(format!(
             "data:image/png;base64,{}",
             base64::engine::general_purpose::STANDARD.encode(bytes)

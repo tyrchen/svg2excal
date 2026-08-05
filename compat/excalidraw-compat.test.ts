@@ -54,6 +54,12 @@ describe("svg2excal target profile", () => {
       expect(restored.some((element) => element.type === "image")).toBe(true);
       expect(Object.keys(fixture.files)).toHaveLength(1);
       expect(
+        Object.values(fixture.files).every(
+          (file) =>
+            typeof (file as { dataURL?: string }).dataURL === "string",
+        ),
+      ).toBe(true);
+      expect(
         restored.every((element) => Boolean(element.customData?.svg2excal)),
       ).toBe(true);
     }
@@ -72,5 +78,10 @@ describe("svg2excal target profile", () => {
 
     expect(svg.tagName.toLowerCase()).toBe("svg");
     expect(svg.querySelectorAll("rect").length).toBeGreaterThan(0);
+    if (fixturePath.includes("generated")) {
+      expect(svg.querySelector("image")?.getAttribute("href")).toMatch(
+        /^data:image\/png;base64,/,
+      );
+    }
   });
 });

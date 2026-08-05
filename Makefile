@@ -17,11 +17,15 @@ test-fixtures:
 
 test-visual: characterize
 	@cd fixtures/baselines && shasum -a 256 -c SHA256SUMS
+	@cargo run -p svg2excal-core --example emit_visual
+	@test -d vendors/excalidraw/node_modules || corepack yarn --cwd vendors/excalidraw install --frozen-lockfile --ignore-scripts
+	@vendors/excalidraw/node_modules/.bin/vitest --config compat/vitest.config.mts run compat/excalidraw-visual.test.ts
+	@cargo run -p svg2excal-core --example verify_visual
 
 test-hostile:
 	@cargo test -p svg2excal-core --test hostile
 
-verify: build test test-fixtures test-hostile test-compat
+verify: build test test-fixtures test-hostile test-compat test-visual
 	@cargo +nightly fmt --all -- --check
 	@cargo clippy --workspace --all-targets --all-features -- -D warnings -W clippy::pedantic
 

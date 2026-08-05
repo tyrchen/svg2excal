@@ -1401,7 +1401,9 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "blake3",
+ "data-url",
  "flate2",
+ "imagesize",
  "proptest",
  "resvg",
  "rstest",
