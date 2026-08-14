@@ -1,13 +1,16 @@
 [package]
 name = "svg2excal-server"
-description = "Bounded HTTP service for SVG to Excalidraw conversion"
+description = "Local bounded HTTP service for SVG and SVGZ to Excalidraw conversion"
+categories = ["graphics", "web-programming::http-server"]
+keywords = ["svg", "excalidraw", "diagram", "http", "converter"]
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
-documentation.workspace = true
+documentation = "https://docs.rs/svg2excal-server"
 repository.workspace = true
-homepage.workspace = true
+readme.workspace = true
+publish.workspace = true
 rust-version.workspace = true
 
 [dependencies]

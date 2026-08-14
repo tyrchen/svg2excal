@@ -33,28 +33,39 @@ contain bounded counts, profile, result code, and fallback pixels only. The
 logging filter disables `usvg` and `resvg`; embedders must preserve that rule for
 hostile content.
 
+Deterministic normalization uses bundled Liberation Sans and Noto Emoji fonts
+plus a Basic CJK subset of Xiaolai. Their provenance and redistribution terms
+are documented in [third-party assets](./svg2excal-third-party-assets.md).
+
 ## Verification
 
-- `make test-fixtures`: semantic feature matrix and canonical architecture fixture.
+- `make test-fixtures`: semantic feature matrix and canonical RFC fixture.
 - `make test-hostile`: parser, resource, geometry, and target-validator attacks.
 - `make test-compat`: pinned Excalidraw restore/re-export compatibility.
 - `make test-visual`: 1×/2× SSIM, CIE76 solid/foreground color, p99 edge distance,
   and alpha-aware fallback-border checks.
 - `make fuzz`: bounded campaigns for all five parser, correlation, geometry, and
   validator fuzz targets; `FUZZ_SECONDS` controls the per-target duration.
-- `make bench`: Criterion end-to-end tiny, `arch.svg`, 1 MiB/5,000-node,
+  `FUZZ_HOST_TARGET` defaults to the host triple reported by `rustc` so
+  sanitizer builds never inherit the target baked into a prebuilt `cargo-fuzz`
+  executable.
+- `make bench`: Criterion end-to-end tiny, `rfc.svg`, 1 MiB/5,000-node,
   10 MiB/50,000-node, path-heavy, text-heavy, 16 MP fallback, deterministic
   rerun, serialization, and target-validation regressions.
+- `make package`: synchronized fixture check, clean-room Cargo package builds,
+  and crates.io's 10 MiB archive-size limit for all workspace crates.
 
-The 2026-08-05 reference run used an Apple M5 Pro (`arm64`), macOS 26.5.2, and
-Rust 1.97.1. Criterion measured tiny conversion at 6.49 µs, `arch.svg` at
-4.58 ms, a generated 5,000-solid-node scene at 13.25 ms, and deserialize plus
-whole-document validation at 520 µs. The hardened large-corpus checks measured
-the generated 50,000-node scene at 167.32 ms and an exact 16 MP raster fallback
-at 73.81 ms. These meet the specified targets with substantial margin. Treat
-latency numbers as release gates on controlled
-hardware; shared CI compiles regressions while scheduled campaigns exercise the
-fuzz suite. Stable latency gates remain reference-hardware release checks.
+The 2026-08-13 reference run used an Apple M5 Pro (`arm64`), macOS 26.5.2, and
+Rust 1.97.1. Criterion measured the 24 KiB canonical `rfc.svg` conversion at
+4.01 ms. Treat latency numbers as release gates only on controlled hardware;
+shared CI compiles benchmarks while scheduled runs exercise the full corpus and
+fuzz suite.
+
+The RFC visual differential requires SSIM of at least 0.95 at 1× and 2×, exact
+solid-interior mean CIE76 delta no greater than 1.0, foreground mean CIE76 delta
+no greater than 3.5, and bidirectional p99 edge distance no greater than 2.25
+CSS pixels. These thresholds account for the fixture's explicitly diagnosed
+font, marker, dash, filter, and clip approximations.
 
 ## Failure interpretation
 

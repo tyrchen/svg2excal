@@ -163,7 +163,9 @@ Every emitted arrow explicitly sets `startArrowhead` and `endArrowhead`, includi
 
 Arrow `startBinding`/`endBinding` are always null in v1. SVG defines no standard graph-topology contract, and v1 has no editor-specific metadata profile. A future binding profile requires its own source schema, reciprocal-reference invariants, and decision entry; proximity alone will remain insufficient.
 
-For `arch.svg`, all 27 marker-bearing objects are eligible for triangle-arrowhead recognition. The double-ended purple line preserves both heads. None receive node bindings.
+For `rfc.svg`, the 12 marker-bearing connectors keep their centerlines as
+native lines and their noncanonical marker artwork as explicit grouped
+geometry. None receive node bindings.
 
 ## 8. Text mapping
 
@@ -190,7 +192,7 @@ Output fields are derived as follows:
 - `autoResize`: true for unwrapped source text;
 - `lineHeight`: configured target font metric.
 
-Font weight/style unsupported by target produces `font-style-approximated`; it is never encoded by choosing a misleading font ID. `arch.svg` uses single-line text, so all 86 strings remain native in balanced/editable mode with a deterministic Inter-to-Liberation-Sans substitution and position correction.
+Font weight/style unsupported by target produces `font-style-approximated`; it is never encoded by choosing a misleading font ID. `rfc.svg` uses single-line text, so all 131 strings remain native in balanced/editable mode with a deterministic Inter-to-Liberation-Sans substitution and position correction.
 
 ## 9. Images and raster fallback
 

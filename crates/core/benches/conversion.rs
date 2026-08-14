@@ -6,7 +6,7 @@ use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use svg2excal_core::{ConversionLimits, ConversionOptions, ExcalidrawDocument, convert};
 
 const TINY: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="32"><rect x="2" y="2" width="60" height="28" fill="#74c0fc" stroke="#1971c2"/></svg>"##;
-const ARCH: &[u8] = include_bytes!("../../../fixtures/arch.svg");
+const RFC: &[u8] = include_bytes!("../fixtures/rfc.svg");
 const FALLBACK: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="2000"><defs><linearGradient id="g"><stop stop-color="#f00"/><stop offset="1" stop-color="#00f"/></linearGradient></defs><rect width="2000" height="2000" fill="url(#g)"/></svg>"##;
 
 fn generated_nodes(count: usize, padding_bytes: usize) -> Vec<u8> {
@@ -72,8 +72,8 @@ fn benchmark_conversion(criterion: &mut Criterion) {
     criterion.bench_function("convert/tiny", |bencher| {
         bencher.iter(|| required_conversion(black_box(TINY), black_box(&options)));
     });
-    criterion.bench_function("convert/arch", |bencher| {
-        bencher.iter(|| required_conversion(black_box(ARCH), black_box(&options)));
+    criterion.bench_function("convert/rfc", |bencher| {
+        bencher.iter(|| required_conversion(black_box(RFC), black_box(&options)));
     });
     criterion.bench_function("convert/5000-solid-nodes", |bencher| {
         bencher.iter_batched(
@@ -107,10 +107,10 @@ fn benchmark_conversion(criterion: &mut Criterion) {
         bencher.iter(|| required_conversion(black_box(FALLBACK), black_box(&options)));
     });
     criterion.bench_function("convert/deterministic-rerun", |bencher| {
-        let baseline = required_conversion(ARCH, &options);
+        let baseline = required_conversion(RFC, &options);
         let baseline_json = required_json(&baseline.document, &options.limits);
         bencher.iter(|| {
-            let rerun = required_conversion(black_box(ARCH), black_box(&options));
+            let rerun = required_conversion(black_box(RFC), black_box(&options));
             if required_json(&rerun.document, &options.limits) != baseline_json {
                 std::process::abort();
             }
@@ -120,7 +120,7 @@ fn benchmark_conversion(criterion: &mut Criterion) {
 
 fn benchmark_target_validation(criterion: &mut Criterion) {
     let options = ConversionOptions::default();
-    let result = required_conversion(ARCH, &options);
+    let result = required_conversion(RFC, &options);
     let json = required_json(&result.document, &options.limits);
     criterion.bench_function("target/deserialize-validate", |bencher| {
         bencher.iter(|| {

@@ -64,7 +64,7 @@ Security/performance and verification constrain every box.
 ## Research basis
 
 - [Study: SVG to editable Excalidraw conversion](../docs/research/study-svg-to-excalidraw.md)
-- [`fixtures/arch.svg`](../fixtures/arch.svg), the M1 end-to-end acceptance fixture
+- [`fixtures/rfc.svg`](../fixtures/rfc.svg), the M1 end-to-end acceptance fixture
 - Vendored Excalidraw, `resvg/usvg`, and the earlier official converter under `../vendors/`
 
 ## Normative conventions

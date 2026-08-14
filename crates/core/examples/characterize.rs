@@ -1,4 +1,4 @@
-//! Reproducible Phase 0 characterization for the canonical architecture fixture.
+//! Reproducible characterization for the canonical RFC fixture.
 
 // This synchronous developer probe intentionally uses blocking filesystem I/O.
 #![allow(clippy::disallowed_methods)]
@@ -8,14 +8,11 @@ use std::{collections::BTreeMap, error::Error, fs, path::Path};
 use serde::Serialize;
 use usvg::tiny_skia_path::PathSegment;
 
-const INPUT: &str = "fixtures/arch.svg";
-const OUTPUT: &str = "fixtures/baselines/arch-usvg-characterization.json";
-const PNG_1X: &str = "fixtures/baselines/arch-resvg-1x.png";
-const PNG_2X: &str = "fixtures/baselines/arch-resvg-2x.png";
-const LIBERATION_SANS: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../vendors/excalidraw/scripts/woff2/assets/LiberationSans-Regular.ttf"
-));
+const INPUT: &str = "fixtures/rfc.svg";
+const OUTPUT: &str = "fixtures/baselines/rfc-usvg-characterization.json";
+const PNG_1X: &str = "fixtures/baselines/rfc-resvg-1x.png";
+const PNG_2X: &str = "fixtures/baselines/rfc-resvg-2x.png";
+const LIBERATION_SANS: &[u8] = include_bytes!("../assets/fonts/LiberationSans-Regular.ttf");
 
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]

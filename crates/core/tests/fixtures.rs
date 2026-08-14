@@ -54,20 +54,20 @@ fn test_should_deny_external_resource_by_default() {
 }
 
 #[test]
-fn test_should_convert_arch_fixture_deterministically() -> Result<(), Box<dyn std::error::Error>> {
-    let input = include_bytes!("../../../fixtures/arch.svg");
+fn test_should_convert_rfc_fixture_deterministically() -> Result<(), Box<dyn std::error::Error>> {
+    let input = include_bytes!("../fixtures/rfc.svg");
     let first = convert(input, &ConversionOptions::default())?;
     let second = convert(input, &ConversionOptions::default())?;
     assert_eq!(
         first.document.to_pretty_json()?,
         second.document.to_pretty_json()?
     );
-    assert_arch_counts(&first);
-    assert_arch_target_json(&first)?;
+    assert_rfc_counts(&first);
+    assert_rfc_target_json(&first)?;
     Ok(())
 }
 
-fn assert_arch_counts(result: &ConversionResult) {
+fn assert_rfc_counts(result: &ConversionResult) {
     assert_eq!(
         result
             .document
@@ -75,16 +75,16 @@ fn assert_arch_counts(result: &ConversionResult) {
             .iter()
             .filter(|element| element.element_type() == "text")
             .count(),
-        86
+        131
     );
     assert_eq!(
         result
             .document
             .elements()
             .iter()
-            .filter(|element| element.element_type() == "arrow")
+            .filter(|element| element.element_type() == "line")
             .count(),
-        27
+        47
     );
     assert_eq!(
         result
@@ -93,7 +93,7 @@ fn assert_arch_counts(result: &ConversionResult) {
             .iter()
             .filter(|element| element.element_type() == "image")
             .count(),
-        8
+        12
     );
     assert_eq!(
         result
@@ -102,34 +102,34 @@ fn assert_arch_counts(result: &ConversionResult) {
             .iter()
             .filter(|diagnostic| diagnostic.code() == DiagnosticCode::FilterOmitted)
             .count(),
-        24
+        12
     );
     assert_eq!(
         result
             .report
             .diagnostics
             .iter()
-            .filter(|diagnostic| diagnostic.code() == DiagnosticCode::PaintIslandRasterized)
+            .filter(|diagnostic| diagnostic.code() == DiagnosticCode::ClipRasterized)
             .count(),
-        8
+        12
     );
     assert_eq!(
         result
             .report
             .diagnostics
             .iter()
-            .filter(|diagnostic| diagnostic.code() == DiagnosticCode::BindingNotInferred)
+            .filter(|diagnostic| { diagnostic.code() == DiagnosticCode::MarkerPreservedAsGeometry })
             .count(),
-        1
+        12
     );
 }
 
-fn assert_arch_target_json(result: &ConversionResult) -> Result<(), Box<dyn std::error::Error>> {
+fn assert_rfc_target_json(result: &ConversionResult) -> Result<(), Box<dyn std::error::Error>> {
     let json: Value = serde_json::from_str(&result.document.to_pretty_json()?)?;
     let elements = json
         .get("elements")
         .and_then(Value::as_array)
-        .ok_or_else(|| std::io::Error::other("missing arch elements"))?;
+        .ok_or_else(|| std::io::Error::other("missing RFC elements"))?;
     assert_eq!(
         elements
             .first()
@@ -143,35 +143,29 @@ fn assert_arch_target_json(result: &ConversionResult) -> Result<(), Box<dyn std:
             .filter_map(|element| element.get("roundness"))
             .filter(|roundness| !roundness.is_null())
             .count()
-            >= 24
+            >= 45
     );
     assert!(elements.iter().all(|element| {
         element.get("frameId").is_some_and(Value::is_null)
             && element.get("boundElements").is_some_and(Value::is_null)
     }));
-    let arrows = elements
+    let lines = elements
         .iter()
-        .filter(|element| element.get("type").and_then(Value::as_str) == Some("arrow"))
+        .filter(|element| element.get("type").and_then(Value::as_str) == Some("line"))
         .collect::<Vec<_>>();
-    assert!(arrows.iter().all(|arrow| {
-        arrow.get("endArrowhead").and_then(Value::as_str) == Some("triangle")
-            && arrow.get("startBinding").is_some_and(Value::is_null)
-            && arrow.get("endBinding").is_some_and(Value::is_null)
+    assert!(lines.iter().all(|line| {
+        line.get("startArrowhead").is_some_and(Value::is_null)
+            && line.get("endArrowhead").is_some_and(Value::is_null)
+            && line.get("startBinding").is_some_and(Value::is_null)
+            && line.get("endBinding").is_some_and(Value::is_null)
     }));
-    assert_eq!(
-        arrows
-            .iter()
-            .filter(|arrow| !arrow.get("startArrowhead").is_none_or(Value::is_null))
-            .count(),
-        1
-    );
     let group_ids = elements
         .iter()
         .filter_map(|element| element.get("groupIds").and_then(Value::as_array))
         .flatten()
         .filter_map(Value::as_str)
         .collect::<BTreeSet<_>>();
-    assert!(group_ids.len() >= 26);
+    assert!(group_ids.len() >= 13);
     Ok(())
 }
 

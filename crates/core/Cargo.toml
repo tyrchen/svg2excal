@@ -1,15 +1,16 @@
 [package]
 name = "svg2excal-core"
-description = "Bounded deterministic SVG/SVGZ to editable Excalidraw conversion core"
-categories = ["development-tools"]
-keywords = ["svg", "excalidraw", "diagram", "converter"]
+description = "Deterministic, resource-bounded SVG and SVGZ to editable Excalidraw conversion"
+categories = ["encoding", "graphics", "parser-implementations"]
+keywords = ["svg", "excalidraw", "diagram", "graphics", "converter"]
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
-documentation.workspace = true
+documentation = "https://docs.rs/svg2excal-core"
 repository.workspace = true
-homepage.workspace = true
+readme.workspace = true
+publish.workspace = true
 rust-version.workspace = true
 
 [dependencies]

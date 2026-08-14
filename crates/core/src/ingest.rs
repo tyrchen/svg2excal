@@ -16,18 +16,9 @@ use crate::{
 };
 
 const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
-const LIBERATION_SANS: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../vendors/excalidraw/scripts/woff2/assets/LiberationSans-Regular.ttf"
-));
-const NOTO_EMOJI: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../vendors/excalidraw/scripts/woff2/assets/NotoEmoji-Regular.ttf"
-));
-const XIAOLAI: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../vendors/excalidraw/scripts/woff2/assets/Xiaolai-Regular.ttf"
-));
+const LIBERATION_SANS: &[u8] = include_bytes!("../assets/fonts/LiberationSans-Regular.ttf");
+const NOTO_EMOJI: &[u8] = include_bytes!("../assets/fonts/NotoEmoji-Regular.ttf");
+const XIAOLAI_BASIC_CJK: &[u8] = include_bytes!("../assets/fonts/Xiaolai-Regular-Basic-CJK.ttf");
 
 pub(crate) const fn bundled_target_font() -> &'static [u8] {
     LIBERATION_SANS
@@ -849,7 +840,7 @@ fn deterministic_usvg_options(
         let fontdb = usvg_options.fontdb_mut();
         fontdb.load_font_source(usvg::fontdb::Source::Binary(Arc::new(LIBERATION_SANS)));
         fontdb.load_font_source(usvg::fontdb::Source::Binary(Arc::new(NOTO_EMOJI)));
-        fontdb.load_font_source(usvg::fontdb::Source::Binary(Arc::new(XIAOLAI)));
+        fontdb.load_font_source(usvg::fontdb::Source::Binary(Arc::new(XIAOLAI_BASIC_CJK)));
         fontdb.set_serif_family("Liberation Sans");
         fontdb.set_sans_serif_family("Liberation Sans");
     }

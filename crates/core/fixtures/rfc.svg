@@ -1,0 +1,362 @@
+
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 1920 1080"
+     width="100%"
+     height="auto"
+     preserveAspectRatio="xMidYMid meet"
+     style="display:block;max-width:100%;height:auto"
+     font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0F172A" flood-opacity="0.10"/>
+    </filter>
+
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8.5" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 .6L9.5 5 0 9.4z" fill="#2563EB"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="8.5" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 .6L9.5 5 0 9.4z" fill="#7C3AED"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="8.5" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 .6L9.5 5 0 9.4z" fill="#0891B2"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8.5" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 .6L9.5 5 0 9.4z" fill="#16A34A"/>
+    </marker>
+    <marker id="arrow-crimson" viewBox="0 0 10 10" refX="8.5" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 .6L9.5 5 0 9.4z" fill="#E11D48"/>
+    </marker>
+
+    <g id="icon-signal" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 15h2M7 12h2v3H7zM11 8h2v7h-2zM15 4h2v11h-2z"/>
+    </g>
+    <g id="icon-doc" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 2.5h8l4 4v11H4zM12 2.5v4h4M7 10h6M7 13h6"/>
+    </g>
+    <g id="icon-search" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="8.5" cy="8.5" r="5.5"/><path d="M12.5 12.5L18 18"/>
+    </g>
+    <g id="icon-graph" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="4" cy="4" r="2"/><circle cx="16" cy="7" r="2"/><circle cx="7" cy="16" r="2"/>
+      <path d="M5.8 4.8l8.3 1.5M14.7 8.7L8.3 14.4M5 5.8l1.3 8.3"/>
+    </g>
+    <g id="icon-check" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="10" cy="10" r="7.5"/><path d="M6.3 10.2l2.6 2.6 5-5.1"/>
+    </g>
+    <g id="icon-code" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M7 5L2.5 10 7 15M13 5l4.5 5-4.5 5M11.5 3l-3 14"/>
+    </g>
+    <g id="icon-eye" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><circle cx="10" cy="10" r="2.5"/>
+    </g>
+    <g id="icon-shield" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10 2.4l6.4 2.3v5.6c0 4-2.7 6.5-6.4 7.7-3.7-1.2-6.4-3.7-6.4-7.7V4.7z"/>
+      <path d="M7.2 10.2l2.2 2.2 4-4.2"/>
+    </g>
+    <g id="icon-user" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="10" cy="6" r="3"/><path d="M4 17c0-3.2 2.7-5.2 6-5.2s6 2 6 5.2"/>
+    </g>
+    <g id="icon-loop" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M15.5 7A6 6 0 0 0 5 5.5L3 8M4.5 13A6 6 0 0 0 15 14.5l2-2.5M3 4.5V8h3.5M17 15.5V12h-3.5"/>
+    </g>
+  </defs>
+
+  <style>
+    .ink{fill:#0F172A}.muted{fill:#64748B}.faint{fill:#94A3B8}
+    .blue{fill:#2563EB}.purple{fill:#7C3AED}.teal{fill:#0891B2}
+    .green{fill:#16A34A}.amber{fill:#B45309}.crimson{fill:#E11D48}
+    .panel{fill:#F8FAFC;stroke:#E2E8F0;stroke-width:1.5}
+    .card{fill:#FFFFFF;stroke-width:1.5}
+    .line{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+    .dash{stroke-dasharray:7 5}
+    .node{font-size:17px;font-weight:700}
+    .body{font-size:12.5px;font-weight:500}
+    .small{font-size:11.5px;font-weight:500}
+    .caps{font-size:13px;font-weight:700;letter-spacing:0}
+    .center{text-anchor:middle}
+  </style>
+
+  <rect width="1920" height="1080" fill="#FFFFFF"/>
+  <text class="ink" x="48" y="64" font-size="46px" font-weight="700">RFC Lifecycle: Evidence to Production Learning</text>
+  <text class="muted" x="50" y="98" font-size="17px">
+    Standing mandates define the boundary; risk sets the gates; production evidence closes the loop.
+  </text>
+
+  <!-- Standing mandate: persistent delegation boundary above individual RFCs. -->
+  <rect x="30" y="125" width="1860" height="120" rx="12" fill="#FFFCF7" stroke="#F2C078" stroke-width="1.5"/>
+  <use href="#icon-shield" x="55" y="142" stroke="#B45309" stroke-width="1.8"/>
+  <text class="amber" x="92" y="157" font-size="19px" font-weight="700">STANDING MANDATE</text>
+  <text class="muted" x="300" y="157" font-size="13.5px">Leadership defines direction, scope, budget, permissions, constraints, and expiry.</text>
+
+  <rect x="50" y="173" width="260" height="31" rx="6" fill="#FFFFFF" stroke="#FED7AA"/>
+  <text class="faint" x="62" y="186" font-size="9.5px" font-weight="700">GOAL</text>
+  <text class="ink" x="106" y="195" font-size="12px" font-weight="700">CI p95: 42 -&gt; 25 minutes</text>
+
+  <rect x="320" y="173" width="280" height="31" rx="6" fill="#FFFFFF" stroke="#FED7AA"/>
+  <text class="faint" x="332" y="186" font-size="9.5px" font-weight="700">SPONSOR / OWNER</text>
+  <text class="ink" x="440" y="195" font-size="12px" font-weight="700">VP Eng / Build Platform</text>
+
+  <rect x="610" y="173" width="300" height="31" rx="6" fill="#FFFFFF" stroke="#FED7AA"/>
+  <text class="faint" x="622" y="186" font-size="9.5px" font-weight="700">SCOPE</text>
+  <text class="ink" x="674" y="195" font-size="12px" font-weight="700">CI config / cache / test selection</text>
+
+  <rect x="920" y="173" width="140" height="31" rx="6" fill="#FFFFFF" stroke="#FED7AA"/>
+  <text class="faint" x="932" y="186" font-size="9.5px" font-weight="700">RISK CEILING</text>
+  <text class="ink" x="1028" y="195" font-size="12px" font-weight="700" text-anchor="end">R1</text>
+
+  <rect x="1070" y="173" width="300" height="31" rx="6" fill="#FFFFFF" stroke="#FED7AA"/>
+  <text class="faint" x="1082" y="186" font-size="9.5px" font-weight="700">BUDGET</text>
+  <text class="ink" x="1136" y="195" font-size="12px" font-weight="700">Agent $2k / cloud $1k / review 12h</text>
+
+  <rect x="1380" y="173" width="230" height="31" rx="6" fill="#FFFFFF" stroke="#FED7AA"/>
+  <text class="faint" x="1392" y="186" font-size="9.5px" font-weight="700">EXPIRY</text>
+  <text class="ink" x="1440" y="195" font-size="12px" font-weight="700">2026-12-31</text>
+
+  <text class="green" x="55" y="228" font-size="11.5px" font-weight="700">AGENT MAY</text>
+  <text class="muted" x="130" y="228" font-size="11.5px">observe / propose / benchmark / modify in scope / canary 10% / auto-rollback</text>
+  <text class="crimson" x="870" y="228" font-size="11.5px" font-weight="700">MAY NOT</text>
+  <text class="muted" x="938" y="228" font-size="11.5px">change mandate / expand scope / raise budget or risk ceiling / grant itself access</text>
+
+  <!-- Main lifecycle and governance panels. -->
+  <rect class="panel" x="30" y="270" width="1420" height="735" rx="12"/>
+  <rect class="panel" x="1480" y="270" width="410" height="735" rx="12"/>
+
+  <text class="blue caps" x="55" y="306">RFC STATE MACHINE</text>
+  <text class="muted" x="210" y="306" font-size="12.5px">facts -&gt; decision -&gt; execution -&gt; production evidence</text>
+
+  <!-- Phase headings and separators. -->
+  <text class="blue caps" x="55" y="335">01  INTAKE + DISCOVERY</text>
+  <line x1="55" y1="343" x2="370" y2="343" stroke="#BFDBFE" stroke-width="2"/>
+  <text class="purple caps" x="395" y="335">02  DRAFT + DECISION</text>
+  <line x1="395" y1="343" x2="710" y2="343" stroke="#DDD6FE" stroke-width="2"/>
+  <text class="teal caps" x="735" y="335">03  COMPILE + EXECUTE</text>
+  <line x1="735" y1="343" x2="1035" y2="343" stroke="#A5F3FC" stroke-width="2"/>
+  <text class="green caps" x="1090" y="335">04  OBSERVE + LEARN</text>
+  <line x1="1090" y1="343" x2="1425" y2="343" stroke="#BBF7D0" stroke-width="2"/>
+
+  <!-- Intake and discovery. -->
+  <g filter="url(#shadow)"><rect class="card" x="70" y="355" width="300" height="82" rx="8" stroke="#93B4F5"/></g>
+  <use href="#icon-signal" x="90" y="374" stroke="#2563EB" stroke-width="1.7"/>
+  <text class="blue node" x="127" y="388">SIGNAL</text>
+  <text class="body muted" x="90" y="410">Observed fact, never a proposed solution</text>
+  <text class="small faint" x="90" y="427">metrics / logs / tickets / incidents / code refs</text>
+
+  <line class="line" x1="220" y1="437" x2="220" y2="451" stroke="#2563EB" marker-end="url(#arrow-blue)"/>
+
+  <g filter="url(#shadow)"><rect class="card" x="70" y="456" width="300" height="100" rx="8" stroke="#93B4F5"/></g>
+  <use href="#icon-search" x="90" y="476" stroke="#2563EB" stroke-width="1.7"/>
+  <text class="blue node" x="127" y="490">CANDIDATE</text>
+  <text class="body muted" x="90" y="512">Dedupe / cluster / link goals + existing RFCs</text>
+  <text class="small faint" x="90" y="531">EV ranks; WIP + budget constrain entry</text>
+  <text class="small faint" x="90" y="545">confidence threshold; sponsor; task or runbook?</text>
+
+  <line class="line" x1="220" y1="556" x2="220" y2="570" stroke="#2563EB" marker-end="url(#arrow-blue)"/>
+
+  <g filter="url(#shadow)"><rect class="card" x="70" y="575" width="300" height="58" rx="8" stroke="#93B4F5"/></g>
+  <text class="blue node center" x="220" y="600">TRIAGED</text>
+  <text class="small muted center" x="220" y="620">task / mini-RFC / full RFC / duplicate / discard</text>
+
+  <line class="line" x1="220" y1="633" x2="220" y2="647" stroke="#2563EB" marker-end="url(#arrow-blue)"/>
+
+  <g filter="url(#shadow)"><rect class="card" x="70" y="652" width="300" height="180" rx="8" stroke="#93B4F5"/></g>
+  <use href="#icon-search" x="90" y="672" stroke="#2563EB" stroke-width="1.7"/>
+  <text class="blue node" x="127" y="686">DISCOVERY</text>
+  <rect x="90" y="700" width="260" height="58" rx="6" fill="#EFF6FF" stroke="#BFDBFE"/>
+  <text class="blue" x="103" y="717" font-size="12px" font-weight="700">VERSIONED CONTEXT PACK</text>
+  <text class="small muted" x="103" y="735">goals / metrics / code / owners</text>
+  <text class="small muted" x="103" y="751">RFCs / incidents / cost / policy</text>
+  <text class="body ink" x="90" y="772" font-weight="700">Output</text>
+  <text class="small muted" x="90" y="790">problem / goals / non-goals / constraints</text>
+  <text class="small muted" x="90" y="807">assumptions / 2+ alternatives / risk / budget</text>
+  <text class="small muted" x="90" y="824">recommendation: formal RFC or stop</text>
+
+  <!-- Discovery hands a versioned context pack into Draft through a reserved gutter. -->
+  <path class="line" d="M370 740h20V425h15" stroke="#7C3AED" marker-end="url(#arrow-purple)"/>
+
+  <!-- Draft, review, and decision. -->
+  <g filter="url(#shadow)"><rect class="card" x="410" y="355" width="300" height="160" rx="8" stroke="#C4B1F7"/></g>
+  <use href="#icon-graph" x="430" y="375" stroke="#7C3AED" stroke-width="1.7"/>
+  <text class="purple node" x="467" y="389">DRAFT</text>
+  <text class="body muted" x="430" y="414">Parallel specialist agents</text>
+  <text class="small muted" x="430" y="433">research / architecture / cost / reliability</text>
+  <text class="small muted" x="430" y="449">security / implementation / critic</text>
+  <text class="small muted" x="430" y="465">strong reasoning for ambiguity + re-planning</text>
+  <rect x="430" y="482" width="260" height="27" rx="5" fill="#FCFAFF" stroke="#DDD6FE"/>
+  <text class="purple center" x="560" y="492" font-size="10px" font-weight="700">CLAIM GRAPH: evidence / confidence</text>
+  <text class="purple center" x="560" y="504" font-size="10px" font-weight="700">validation / failure condition</text>
+
+  <line class="line" x1="560" y1="515" x2="560" y2="527" stroke="#7C3AED" marker-end="url(#arrow-purple)"/>
+
+  <g filter="url(#shadow)"><rect class="card" x="410" y="532" width="300" height="166" rx="8" stroke="#C4B1F7"/></g>
+  <use href="#icon-check" x="430" y="552" stroke="#7C3AED" stroke-width="1.7"/>
+  <text class="purple node" x="467" y="566">REVIEW</text>
+  <text class="purple" x="430" y="590" font-size="11.5px" font-weight="700">1  AUTOMATED RFC LINT</text>
+  <text class="small muted" x="430" y="607">owner / goals / metrics / alternatives / assets</text>
+  <text class="small muted" x="430" y="622">rollout / rollback / budget / risk / observe / handoff</text>
+  <text class="purple" x="430" y="643" font-size="11.5px" font-weight="700">2  SPECIALIST AGENT REVIEW</text>
+  <text class="small muted" x="430" y="660">objection = invariant + evidence + failure + remedy</text>
+  <text class="purple" x="430" y="681" font-size="11.5px" font-weight="700">3  HUMAN DECISION BRIEF</text>
+
+  <line class="line" x1="560" y1="698" x2="560" y2="715" stroke="#7C3AED" marker-end="url(#arrow-purple)"/>
+
+  <g filter="url(#shadow)"><rect class="card" x="410" y="720" width="300" height="136" rx="8" stroke="#C4B1F7"/></g>
+  <use href="#icon-user" x="430" y="739" stroke="#7C3AED" stroke-width="1.7"/>
+  <text class="purple node" x="467" y="753">DECISION</text>
+  <text class="body ink" x="430" y="776" font-weight="700">One Accountable Owner</text>
+  <text class="body ink" x="430" y="793" font-weight="700">Exactly one final Decider</text>
+  <text class="small muted" x="430" y="811">required / advisory / affected / policy reviewers</text>
+  <rect x="430" y="822" width="78" height="25" rx="6" fill="#FFF1F2" stroke="#FECDD3"/>
+  <text class="crimson center" x="469" y="839" font-size="10px" font-weight="700">REJECTED</text>
+  <rect x="518" y="822" width="74" height="25" rx="6" fill="#FFFBEB" stroke="#F2C078"/>
+  <text class="amber center" x="555" y="839" font-size="10px" font-weight="700">PARKED</text>
+  <rect x="602" y="822" width="88" height="25" rx="6" fill="#F0FDF4" stroke="#BBF7D0"/>
+  <text class="green center" x="646" y="839" font-size="10px" font-weight="700">ACCEPTED</text>
+
+  <!-- Accepted RFC compiles into executable work. -->
+  <path class="line" d="M710 834h20V403h15" stroke="#7C3AED" marker-end="url(#arrow-purple)"/>
+
+  <!-- Compile, execute, verify, and rollout. -->
+  <g filter="url(#shadow)"><rect class="card" x="750" y="355" width="285" height="92" rx="8" stroke="#7DD3E8"/></g>
+  <use href="#icon-doc" x="770" y="375" stroke="#0891B2" stroke-width="1.7"/>
+  <text class="teal node" x="807" y="389">COMPILED</text>
+  <text class="body muted" x="770" y="414">RFC -&gt; tasks / dependencies</text>
+  <text class="small faint" x="770" y="432">permissions / budget / rollout / rollback / observe</text>
+
+  <line class="line" x1="892" y1="447" x2="892" y2="463" stroke="#0891B2" marker-end="url(#arrow-teal)"/>
+
+  <g filter="url(#shadow)"><rect class="card" x="750" y="468" width="285" height="98" rx="8" stroke="#7DD3E8"/></g>
+  <use href="#icon-code" x="770" y="488" stroke="#0891B2" stroke-width="1.7"/>
+  <text class="teal node" x="807" y="502">EXECUTING</text>
+  <text class="body muted" x="770" y="527">Agents execute within mandate permissions</text>
+  <text class="small faint" x="770" y="546">cheap: search / tests / routine code / benchmark</text>
+  <text class="small faint" x="770" y="558">strong: framing / architecture / trade-offs</text>
+
+  <line class="line" x1="892" y1="566" x2="892" y2="582" stroke="#0891B2" marker-end="url(#arrow-teal)"/>
+
+  <g filter="url(#shadow)"><rect class="card" x="750" y="587" width="285" height="80" rx="8" stroke="#7DD3E8"/></g>
+  <use href="#icon-check" x="770" y="607" stroke="#0891B2" stroke-width="1.7"/>
+  <text class="teal node" x="807" y="621">VERIFYING</text>
+  <text class="body muted" x="770" y="646">tests / benchmark / policy / security</text>
+  <text class="small faint" x="770" y="661">claim evidence is updated, not merely asserted</text>
+
+  <line class="line" x1="892" y1="667" x2="892" y2="683" stroke="#0891B2" marker-end="url(#arrow-teal)"/>
+
+  <g filter="url(#shadow)"><rect class="card" x="750" y="688" width="285" height="118" rx="8" stroke="#7DD3E8"/></g>
+  <use href="#icon-loop" x="770" y="708" stroke="#0891B2" stroke-width="1.7"/>
+  <text class="teal node" x="807" y="722">ROLLOUT</text>
+  <text class="body muted" x="770" y="747">staged canary / progressive exposure</text>
+  <text class="small faint" x="770" y="766">auto-rollback; R0-R1 in mandate; R2+ gated</text>
+  <rect x="770" y="778" width="245" height="18" rx="4" fill="#ECFEFF"/>
+  <text class="teal center" x="892" y="791" font-size="10.5px" font-weight="700">REVERSIBILITY DETERMINES AUTONOMY</text>
+
+  <!-- Rollout enters production observation. -->
+  <path class="line" d="M1035 747h27V435h23" stroke="#16A34A" marker-end="url(#arrow-green)"/>
+
+  <!-- Observe and outcome branches. -->
+  <g filter="url(#shadow)"><rect class="card" x="1090" y="355" width="335" height="158" rx="8" stroke="#86DCA8"/></g>
+  <use href="#icon-eye" x="1110" y="375" stroke="#16A34A" stroke-width="1.7"/>
+  <text class="green node" x="1147" y="389">OBSERVING</text>
+  <text class="body muted" x="1110" y="414">Measure the declared production window</text>
+  <text class="small muted" x="1110" y="434">success / guardrails / cost / incidents / user impact</text>
+  <rect x="1110" y="449" width="295" height="45" rx="6" fill="#F0FDF4" stroke="#BBF7D0"/>
+  <text class="green" x="1123" y="467" font-size="11.5px" font-weight="700">VALIDATE CLAIMS</text>
+  <text class="small muted" x="1123" y="485">evidence vs. confidence + failure conditions</text>
+  <text class="small faint" x="1110" y="507">Post-Launch Review writes durable learning</text>
+
+  <!-- Outcome fan-out. -->
+  <path class="line" d="M1258 513v12M1169 525h178M1169 525v8M1347 525v8M1258 525v110M1169 635h178M1169 635v8M1347 635v8"
+        stroke="#16A34A"/>
+  <circle cx="1258" cy="525" r="3.5" fill="#16A34A"/>
+
+  <rect x="1090" y="538" width="157" height="88" rx="7" fill="#F0FDF4" stroke="#86DCA8"/>
+  <text class="green center" x="1169" y="564" font-size="13px" font-weight="700">CLOSED</text>
+  <text class="small muted center" x="1169" y="585">success criteria met</text>
+  <text class="small muted center" x="1169" y="603">archive learning</text>
+
+  <rect x="1268" y="538" width="157" height="88" rx="7" fill="#FCFAFF" stroke="#C4B1F7"/>
+  <text class="purple center" x="1347" y="564" font-size="13px" font-weight="700">AMENDMENT</text>
+  <text class="small muted center" x="1347" y="585">assumption changed</text>
+  <text class="small muted center" x="1347" y="603">return to Draft</text>
+
+  <rect x="1090" y="648" width="157" height="88" rx="7" fill="#FFFBEB" stroke="#F2C078"/>
+  <text class="amber center" x="1169" y="674" font-size="13px" font-weight="700">ROLLED BACK</text>
+  <text class="small muted center" x="1169" y="695">guardrail failed</text>
+  <text class="small muted center" x="1169" y="713">return to Decision</text>
+
+  <rect x="1268" y="648" width="157" height="88" rx="7" fill="#FFF1F2" stroke="#F7A8BC"/>
+  <text class="crimson center" x="1347" y="674" font-size="13px" font-weight="700">INCIDENT</text>
+  <text class="small muted center" x="1347" y="695">unexpected harm</text>
+  <text class="small muted center" x="1347" y="713">emit a new Signal</text>
+
+  <!-- Evidence feedback rail returns to intake. -->
+  <path class="line dash" d="M1258 736v148H45V506h20" stroke="#0891B2" marker-end="url(#arrow-teal)"/>
+  <text class="teal" x="520" y="876" font-size="12px" font-weight="700">
+    PRODUCTION EVIDENCE -&gt; NEW SIGNAL / AMENDMENT / NEXT CANDIDATE
+  </text>
+
+  <!-- Auditable memory across the full lifecycle. -->
+  <rect x="55" y="900" width="1370" height="72" rx="8" fill="#FFFFFF" stroke="#DCEFE1"/>
+  <text class="green" x="75" y="928" font-size="13px" font-weight="700">AUDITABLE MEMORY</text>
+  <text class="muted" x="215" y="928" font-size="12.5px">
+    Versioned Context Pack  -&gt;  Claim Graph  -&gt;  Decision Record  -&gt;  Execution Plan  -&gt;  Observation Report
+  </text>
+  <text class="small faint" x="75" y="952">Years later, the system can reconstruct what was known, assumed, decided, delegated, and observed.</text>
+
+  <!-- Risk-driven autonomy panel. -->
+  <text class="crimson caps" x="1510" y="306">RISK SETS THE PROCESS</text>
+  <text class="small muted" x="1510" y="326">The RFC author cannot self-select a lower tier.</text>
+
+  <rect x="1510" y="343" width="350" height="55" rx="7" fill="#F0FDF4" stroke="#BBF7D0"/>
+  <rect x="1510" y="343" width="44" height="55" rx="7" fill="#DCFCE7"/>
+  <text class="green center" x="1532" y="376" font-size="15px" font-weight="700">R0</text>
+  <text class="ink" x="1565" y="363" font-size="12px" font-weight="700">Docs / tests / no behavior change</text>
+  <text class="small muted" x="1565" y="383">agent may merge; notify or sample audit</text>
+
+  <rect x="1510" y="405" width="350" height="55" rx="7" fill="#F5FEFF" stroke="#A5F3FC"/>
+  <rect x="1510" y="405" width="44" height="55" rx="7" fill="#CFFAFE"/>
+  <text class="teal center" x="1532" y="438" font-size="15px" font-weight="700">R1</text>
+  <text class="ink" x="1565" y="425" font-size="12px" font-weight="700">Single service / reversible / internal</text>
+  <text class="small muted" x="1565" y="445">agent executes; owner veto window</text>
+
+  <rect x="1510" y="467" width="350" height="55" rx="7" fill="#EFF6FF" stroke="#BFDBFE"/>
+  <rect x="1510" y="467" width="44" height="55" rx="7" fill="#DBEAFE"/>
+  <text class="blue center" x="1532" y="500" font-size="15px" font-weight="700">R2</text>
+  <text class="ink" x="1565" y="487" font-size="12px" font-weight="700">User-visible / cost / limited prod risk</text>
+  <text class="small muted" x="1565" y="507">explicit human owner decision</text>
+
+  <rect x="1510" y="529" width="350" height="64" rx="7" fill="#FFFBEB" stroke="#F2C078"/>
+  <rect x="1510" y="529" width="44" height="64" rx="7" fill="#FEF3C7"/>
+  <text class="amber center" x="1532" y="566" font-size="15px" font-weight="700">R3</text>
+  <text class="ink" x="1565" y="548" font-size="12px" font-weight="700">Migration / security / cross-service</text>
+  <text class="small muted" x="1565" y="568">multi-domain human review</text>
+  <text class="small muted" x="1565" y="585">plus staged rollout</text>
+
+  <rect x="1510" y="600" width="350" height="64" rx="7" fill="#FFF1F2" stroke="#F7A8BC"/>
+  <rect x="1510" y="600" width="44" height="64" rx="7" fill="#FFE4E6"/>
+  <text class="crimson center" x="1532" y="637" font-size="15px" font-weight="700">R4</text>
+  <text class="ink" x="1565" y="619" font-size="12px" font-weight="700">Legal / privacy / irreversible / company-wide</text>
+  <text class="small muted" x="1565" y="639">formal leadership / legal / security decision</text>
+  <text class="small muted" x="1565" y="656">agents analyze; humans authorize</text>
+
+  <rect x="1510" y="682" width="350" height="126" rx="8" fill="#FCFAFF" stroke="#C4B1F7"/>
+  <text class="purple" x="1530" y="710" font-size="13px" font-weight="700">EFFECTIVE AGENT AUTONOMY</text>
+  <text class="ink" x="1530" y="735" font-size="12px" font-weight="700">min(</text>
+  <text class="small muted" x="1560" y="755">policy ceiling, human delegation, trust profile,</text>
+  <text class="small muted" x="1560" y="773">evidence confidence, reversibility limit</text>
+  <text class="ink" x="1530" y="791" font-size="12px" font-weight="700">)</text>
+  <text class="crimson" x="1580" y="791" font-size="10.5px" font-weight="700">confidence never expands authority by itself</text>
+
+  <rect x="1510" y="825" width="350" height="150" rx="8" fill="#FFFFFF" stroke="#E2E8F0"/>
+  <text class="ink" x="1530" y="853" font-size="13px" font-weight="700">HUMAN AUTHORITY</text>
+  <use href="#icon-user" x="1530" y="868" stroke="#7C3AED" stroke-width="1.5"/>
+  <text class="small muted" x="1564" y="882">exactly one final Decider</text>
+  <text class="small muted" x="1530" y="905">Required reviewers hold domain-specific authority.</text>
+  <text class="small muted" x="1530" y="924">A blocker cites invariant, evidence, failure scenario,</text>
+  <text class="small muted" x="1530" y="942">release condition, and reviewer authority.</text>
+  <text class="small muted" x="1530" y="961">Accepted residual risk is explicit and recorded.</text>
+</svg>

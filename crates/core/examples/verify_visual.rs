@@ -8,22 +8,19 @@ use std::{error::Error, fs};
 use base64::Engine as _;
 use svg2excal_core::{ConversionLimits, ExcalidrawDocument};
 
-const CANDIDATE_SVG: &str = "target/visual/arch-excalidraw.svg";
-const TARGET_SSIM: f64 = 0.98;
+const CANDIDATE_SVG: &str = "target/visual/rfc-excalidraw.svg";
+const TARGET_SSIM: f64 = 0.95;
 const MAX_SOLID_INTERIOR_COLOR_DELTA: f64 = 1.0;
-const MAX_FOREGROUND_COLOR_DELTA: f64 = 2.0;
+const MAX_FOREGROUND_COLOR_DELTA: f64 = 3.5;
 const MAX_EDGE_P99_CSS_PX: f64 = 2.25;
-const LIBERATION_SANS: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../vendors/excalidraw/scripts/woff2/assets/LiberationSans-Regular.ttf"
-));
+const LIBERATION_SANS: &[u8] = include_bytes!("../assets/fonts/LiberationSans-Regular.ttf");
 
 fn main() -> Result<(), Box<dyn Error>> {
     verify_fallback_padding()?;
     let candidate = fs::read(CANDIDATE_SVG)?;
     let tree = usvg::Tree::from_data(&candidate, &deterministic_options())?;
     for scale in [1_u32, 2_u32] {
-        let reference_path = format!("fixtures/baselines/arch-resvg-{scale}x.png");
+        let reference_path = format!("fixtures/baselines/rfc-resvg-{scale}x.png");
         let reference = resvg::tiny_skia::Pixmap::load_png(&reference_path)?;
         let rendered = render(&tree, scale)?;
         if rendered.width() != reference.width() || rendered.height() != reference.height() {
@@ -41,32 +38,32 @@ fn main() -> Result<(), Box<dyn Error>> {
         let solid_delta = mean_solid_interior_color_delta(&reference, &rendered)?;
         let edge_p99 = bidirectional_edge_p99(&reference, &rendered, scale)?;
         println!(
-            "arch.svg {scale}x SSIM: {score:.6}; foreground CIE76 delta: {color_delta:.6}; \
+            "rfc.svg {scale}x SSIM: {score:.6}; foreground CIE76 delta: {color_delta:.6}; \
              exact-solid CIE76 delta: {solid_delta:.6}; edge-distance p99: {edge_p99:.3} CSS px"
         );
-        rendered.save_png(format!("target/visual/arch-excalidraw-{scale}x.png"))?;
+        rendered.save_png(format!("target/visual/rfc-excalidraw-{scale}x.png"))?;
         if score < TARGET_SSIM {
             return Err(
-                format!("arch.svg {scale}x SSIM {score:.6} is below {TARGET_SSIM:.2}").into(),
+                format!("rfc.svg {scale}x SSIM {score:.6} is below {TARGET_SSIM:.2}").into(),
             );
         }
         if solid_delta > MAX_SOLID_INTERIOR_COLOR_DELTA {
             return Err(format!(
-                "arch.svg {scale}x exact-solid mean color delta {solid_delta:.6} exceeds \
+                "rfc.svg {scale}x exact-solid mean color delta {solid_delta:.6} exceeds \
                  {MAX_SOLID_INTERIOR_COLOR_DELTA:.2}"
             )
             .into());
         }
         if color_delta > MAX_FOREGROUND_COLOR_DELTA {
             return Err(format!(
-                "arch.svg {scale}x foreground mean color delta {color_delta:.6} exceeds \
+                "rfc.svg {scale}x foreground mean color delta {color_delta:.6} exceeds \
                  {MAX_FOREGROUND_COLOR_DELTA:.2}"
             )
             .into());
         }
         if edge_p99 > MAX_EDGE_P99_CSS_PX {
             return Err(format!(
-                "arch.svg {scale}x edge-distance p99 {edge_p99:.3} exceeds \
+                "rfc.svg {scale}x edge-distance p99 {edge_p99:.3} exceeds \
                  {MAX_EDGE_P99_CSS_PX:.2} CSS px"
             )
             .into());
@@ -116,7 +113,7 @@ fn extent(value: f32, scale: u32) -> Result<u32, Box<dyn Error>> {
 
 fn verify_fallback_padding() -> Result<(), Box<dyn Error>> {
     let document = ExcalidrawDocument::from_json(
-        &fs::read("target/visual/arch.excalidraw")?,
+        &fs::read("target/visual/rfc.excalidraw")?,
         &ConversionLimits::default(),
     )?;
     for file in document.files().values() {

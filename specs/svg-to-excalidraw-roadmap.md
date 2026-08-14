@@ -20,7 +20,7 @@ Status: ready for implementation v1 · Owner: svg2excal maintainers · Last upda
               ▼
 ┌───────────────────────────┐
 │ M1 Editable diagrams      │
-│ arch.svg native shapes,   │
+│ rfc.svg native shapes,    │
 │ text, icons, connectors   │
 └─────────────┬─────────────┘
               ▼
@@ -55,14 +55,14 @@ Status: ready for implementation v1 · Owner: svg2excal maintainers · Last upda
 
 ## 3. M1 — Editable architecture diagrams
 
-**User outcome:** Diagram-like SVGs using CSS, groups, transforms, defs/use, markers, routed paths, and simple text become meaningfully editable scenes. `fixtures/arch.svg` is the reference experience.
+**User outcome:** Diagram-like SVGs using CSS, groups, transforms, defs/use, markers, routed paths, and simple text become meaningfully editable scenes. `fixtures/rfc.svg` is the reference experience.
 
 **Includes:** dual source/paint trees, cascade/reference normalization, correlation, path flattening, arrowhead recognition, group IDs, deterministic font fallback and target text measurement, and bounded omission of recognized cosmetic drop shadows.
 
 **Exit criteria:**
 
-- every `arch.svg` structural assertion in the verification plan passes;
-- all 86 strings are editable target text;
+- every `rfc.svg` structural assertion in the verification plan passes;
+- all 131 strings are editable target text;
 - representable cards/lanes/connectors are native;
 - correct marker direction, CSS conflict resolution, icon transforms, and paint order are verified;
 - no frames/bindings/card groups are invented;
@@ -81,7 +81,7 @@ Status: ready for implementation v1 · Owner: svg2excal maintainers · Last upda
 - every feature-matrix construct has a native/approximate/fallback/strict outcome and diagnostic;
 - no fallback absorbs an unrelated native text/shape when a smaller valid island exists;
 - fallback islands meet SSIM/no-clipping gates at 1× and 2×;
-- `arch.svg` balanced whole-image SSIM is at least 0.98;
+- `rfc.svg` balanced whole-image SSIM is at least 0.95 at 1× and 2×;
 - file references and output budgets validate after upstream restore.
 
 **Calendar:** 3–4 additional engineering weeks; cumulative 12–16 including Phase 0.

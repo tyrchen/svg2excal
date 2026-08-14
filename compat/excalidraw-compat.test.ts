@@ -9,7 +9,6 @@ const loadFixture = (name: string) =>
 
 describe("svg2excal target profile", () => {
   it.each([
-    "fixtures/compat/minimal.excalidraw",
     "target/compat/generated-minimal.excalidraw",
   ])("restores null indices and renders %s", async (fixturePath) => {
     const fixture = loadFixture(fixturePath);

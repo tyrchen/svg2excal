@@ -4,36 +4,35 @@ resolver = "3"
 
 [workspace.package]
 version = "0.1.0"
-authors = ["svg2excal maintainers"]
+authors = ["Tyr Chen"]
 edition = "2024"
 license = "MIT"
 rust-version = "1.97.1"
-documentation = "https://docs.rs/svg2excal-core"
 repository = "https://github.com/tyrchen/svg2excal"
-homepage = "https://github.com/tyrchen/svg2excal"
 readme = "README.md"
+publish = ["crates-io"]
 
 [workspace.dependencies]
 anyhow = "1.0.104"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "query", "tokio", "tracing"] }
 base64 = "0.23.1"
-blake3 = "1.8.5"
-clap = { version = "=4.6.1", features = ["derive"] }
+blake3 = "1.8.6"
+clap = { version = "=4.6.6", features = ["derive"] }
 config = { version = "0.15.25", default-features = false, features = ["yaml"] }
 criterion = "0.8.2"
 data-url = "0.3.2"
 flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
-http-body-util = "0.1.4"
+http-body-util = "0.1.5"
 imagesize = "0.15.0"
 proptest = "1.11.0"
 resvg = { version = "0.48.1", default-features = false, features = ["raster-images", "text"] }
 rstest = "0.26.1"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-skrifa = "0.45.1"
+skrifa = "0.46.0"
 svgtypes = "0.16.1"
 tempfile = "3.27.0"
-thiserror = "2.0.19"
+thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["fs", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 tower = { version = "0.5.3", features = ["limit", "timeout", "util"] }
 tower-http = { version = "0.7.0", features = ["limit", "trace"] }
@@ -44,6 +43,26 @@ usvg = { version = "0.48.1", default-features = false, features = ["text"] }
 
 # workspace crates
 svg2excal-core = { path = "crates/core", version = "0.1.0" }
+
+[workspace.metadata.release]
+allow-branch = ["master"]
+shared-version = true
+consolidate-commits = true
+pre-release-hook = [
+    "git-cliff",
+    "--repository",
+    "../..",
+    "--tag",
+    "v{{version}}",
+    "-o",
+    "../../CHANGELOG.md",
+]
+pre-release-commit-message = "chore(release): v{{version}}"
+tag-name = "v{{version}}"
+tag-message = "svg2excal v{{version}}"
+push-remote = "origin"
+publish = true
+verify = true
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"

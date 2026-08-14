@@ -146,18 +146,17 @@ The correlator models:
 
 The algorithm is bounded by `max_correlation_candidates`; it falls back to paint-only lowering rather than quadratic blow-up. Native primitive/arrow/group promotion requires `Exact` or `UniqueFingerprint`. Visual fallback does not require correlation.
 
-## 9. `arch.svg` normalization contract
+## 9. `rfc.svg` normalization contract
 
 The fixture MUST prove:
 
-- all 28 class rules are applied with correct cascade and inheritance;
-- `.card` class fill wins over the presentation attributes on the two conflicting cards;
-- all 26 `<use>` instances expand with instance paint and composed transforms;
-- the scaled users icon scales geometry and stroke;
-- all 27 marker-bearing connector/legend paths preserve marker side, orientation, and effective size;
-- six orthogonal path connectors normalize to their exact turn points;
-- all 86 text nodes retain decoded Unicode, resolved anchor, requested font metadata, and finite bounds;
-- 24 filtered groups retain their filter/isolation boundary;
+- all 18 class rules are applied with correct cascade and inheritance;
+- `.card` class fill resolves to white on every card while per-card strokes remain intact;
+- all 13 `<use>` instances expand with instance paint and composed transforms;
+- all 12 marker-bearing connector paths preserve marker side, orientation, and effective size;
+- the four orthogonal path connectors normalize to their exact turn points;
+- all 131 text nodes retain decoded Unicode, resolved anchor, requested font metadata, and finite bounds;
+- 12 filtered groups retain their filter/isolation boundary;
 - source paint order remains recoverable after expansions.
 
 ## 10. Errors and diagnostics

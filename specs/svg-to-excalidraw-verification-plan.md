@@ -85,26 +85,25 @@ Root fixtures live under `fixtures/` and are the canonical integration corpus. S
 
 Every fixture has a declarative expectation file containing source feature counts, expected decision classes/codes, native text strings, target element constraints, and visual mask/tolerance. It does not snapshot random or environment-dependent fields because none should exist.
 
-## 6. `arch.svg` acceptance
+## 6. `rfc.svg` acceptance
 
-[`fixtures/arch.svg`](../fixtures/arch.svg) is the M1 end-to-end gate.
+[`fixtures/rfc.svg`](../fixtures/rfc.svg) is the M1 end-to-end gate.
 
 ### Source/normalization assertions
 
-- root viewport is 2,180 × 1,420 CSS px;
-- XML counts match the research census: 55 rect, 86 text, 24 line, 46 path, 26 use, 53 group, 16 circle, 1 ellipse, 5 marker;
-- all 28 stylesheet classes participate correctly;
-- `.card` class fill wins on the “Ready to Publish” and “Policy Engine” rectangles, so their computed fill is white;
-- 26 icon uses and 28 marker instances expand with correct inherited styles/transforms;
-- the users icon's 1.7 scale affects geometry and stroke;
-- 24 shadow filter applications remain discoverable as isolation boundaries;
-- six visible orthogonal connector paths preserve exact turn points.
+- root viewport is 1,920 × 1,080 CSS px;
+- XML counts match the research census: 46 rect, 131 text, 12 line, 21 path, 13 use, 22 group, 8 circle, and 5 marker;
+- all 18 stylesheet classes participate correctly;
+- `.card` class fill resolves to white while each card's presentation-attribute stroke remains intact;
+- 13 icon uses and 12 marker instances expand with correct inherited styles/transforms;
+- 12 shadow filter applications remain discoverable as isolation boundaries;
+- four visible orthogonal connector paths preserve exact turn points.
 
 ### Target/editability assertions
 
-- all 86 decoded source strings occur as native target text, with center/start anchoring preserved within the text threshold;
+- all 131 decoded source strings occur as native target text, with center/start/end anchoring preserved within the text threshold;
 - every representable scene rectangle and straight/orthogonal connector is native, not absorbed by unrelated fallback;
-- all 27 marker-bearing connector/legend objects preserve the correct start/end head; the purple “assists” flow is double-ended;
+- all 12 marker-bearing connectors preserve their endpoint marker as explicit geometry and remain unbound;
 - each expanded icon instance with two or more target elements has its own group ID;
 - group membership never changes paint order;
 - there are zero frames, frame memberships, inferred container texts, or arrow bindings;
@@ -122,7 +121,8 @@ Balanced mode must report the applicable subset of:
 - `dash-pattern-approximated` for numeric SVG dash arrays;
 - `path-flattened` for curved icon/header geometry kept editable;
 - `filter-omitted` for the fixture's recognized `feDropShadow` (`opacity 0.10`, `stdDeviation 3`, `dx 0`, `dy 2`), which is inside balanced defaults; fidelity instead reports `paint-island-rasterized`;
-- `binding-not-inferred` once as a summary, not one noisy entry per connector.
+- `clip-rasterized` for each of the 12 bounded filtered-card paint islands;
+- `marker-preserved-as-geometry` for each of the 12 noncanonical marker instances.
 
 There must be no unreported visible loss.
 
@@ -154,7 +154,7 @@ Initial thresholds, calibrated in Phase 0 and then frozen:
 | Substituted text | anchor/box error ≤ 1.5 px and no clipping |
 | Flattened paths | edge p99 ≤ configured curve tolerance + 0.75 px |
 | Raster fallback islands | SSIM ≥ 0.995 and no clipped nontransparent pixel |
-| Whole `arch.svg`, balanced | SSIM ≥ 0.98 plus all region-specific gates |
+| Whole `rfc.svg`, balanced | SSIM ≥ 0.95 at 1× and 2× plus all region-specific gates |
 
 Threshold changes require a key decision with before/after evidence; tests may not be weakened to accept an unexplained diff.
 
@@ -203,7 +203,7 @@ Seed corpus includes every focused fixture and minimized historical failure. Fuz
 
 ## 11. Performance regression
 
-Phase 4 adds criterion benchmarks for source parse, usvg adaptation, correlation, curve flattening, raster fallback, target validation, and serialization. Bench fixtures represent tiny, `arch.svg`, 1 MiB/5k-node, path-heavy, text-heavy, and fallback-heavy cases. CI uses statistically meaningful regression thresholds after baselines stabilize.
+Phase 4 adds criterion benchmarks for source parse, usvg adaptation, correlation, curve flattening, raster fallback, target validation, and serialization. Bench fixtures represent tiny, `rfc.svg`, 1 MiB/5k-node, path-heavy, text-heavy, and fallback-heavy cases. CI uses statistically meaningful regression thresholds after baselines stabilize.
 
 ## 12. Make targets and gates
 

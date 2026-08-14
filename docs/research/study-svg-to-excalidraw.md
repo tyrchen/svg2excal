@@ -14,7 +14,7 @@ Operationally, the Excalidraw and resvg pins were current active upstream commit
 
 ## Why this study
 
-This study answers one question: **what architecture can turn static SVG into an editable, visually faithful, deterministic Excalidraw scene without making correctness depend on diagram-specific heuristics?** The answer must cover arbitrary SVG constructs, define honest fallbacks for target-format gaps, and work well on [`fixtures/arch.svg`](../../fixtures/arch.svg).
+This study answers one question: **what architecture can turn static SVG into an editable, visually faithful, deterministic Excalidraw scene without making correctness depend on diagram-specific heuristics?** The answer must cover arbitrary SVG constructs, define honest fallbacks for target-format gaps, and work well on [`fixtures/rfc.svg`](../../fixtures/rfc.svg).
 
 The research used the [W3C SVG 2 specification](https://www.w3.org/TR/SVG/), the [current Excalidraw source and documentation](https://github.com/excalidraw/excalidraw), and the [current usvg API documentation](https://docs.rs/usvg/latest/usvg/), inspected on 2026-08-04. SVG is a retained painting format with shapes, text, images, groups, styling, transforms, references, clipping, masking, and filters. Excalidraw is a scene of a much smaller set of editable primitives. A total, lossless, editable mapping therefore does not exist; the converter needs a principled loss policy rather than a list of ad hoc tag conversions.
 
@@ -109,19 +109,39 @@ The official `svg-to-excalidraw` prototype demonstrates direct primitive convers
 
 Patterns to keep are transform accumulation, local-point normalization, and explicit group IDs. Patterns to avoid are DOM-attribute merging as computed style, white-as-transparency, random output, obsolete copied target types, and unsupported-tag omission without diagnostics.
 
-## `arch.svg` case study
+## `rfc.svg` case study
 
-The fixture is a 2,180 × 1,420 static architecture diagram with 317 XML elements. It contains 55 rectangles, 86 text nodes, 24 lines, 46 paths, 26 `<use>` instances, 53 groups, 16 circles, one ellipse, five markers, and one drop-shadow filter. Definitions include 24 reusable icons and five arrowhead markers ([`arch.svg:4-108`](../../fixtures/arch.svg#L4-L108)); a 28-class stylesheet carries most colors, type roles, stroke widths, anchoring, and dash styles ([`arch.svg:110-131`](../../fixtures/arch.svg#L110-L131)).
+The fixture is a 1,920 × 1,080 static RFC lifecycle diagram with 263 XML
+elements. It contains 46 rectangles, 131 text nodes, 12 lines, 21 paths, 13
+`<use>` instances, 22 groups, eight circles, five markers, and one drop-shadow
+filter used by 12 groups. Definitions include reusable icons and five marker
+variants ([`rfc.svg:8-67`](../../fixtures/rfc.svg#L8-L67)); an 18-class
+stylesheet carries colors, type roles, strokes, anchoring, and dash styles
+([`rfc.svg:69-82`](../../fixtures/rfc.svg#L69-L82)).
 
 The fixture proves five load-bearing points:
 
-1. **Computed style is mandatory.** `.card { fill:#FFFFFF }` is a class rule and outranks presentation attributes on two card rectangles. Direct-attribute precedence would render the wrong fill ([`arch.svg:115`](../../fixtures/arch.svg#L115), [`arch.svg:268`](../../fixtures/arch.svg#L268), [`arch.svg:364`](../../fixtures/arch.svg#L364)).
-2. **Reference and transform resolution are mandatory.** Icons inherit style through definition groups and `<use>` instances; one use is additionally translated and scaled ([`arch.svg:25-108`](../../fixtures/arch.svg#L25-L108), [`arch.svg:163`](../../fixtures/arch.svg#L163)).
-3. **Document groups are not diagram semantics.** Most cards consist of a filtered rectangle followed by sibling icon/text/header elements. Mechanical `<g>` mirroring will not group what users perceive as a card.
-4. **Connector promotion is valuable but must be conservative.** Twenty-seven objects carry markers; visible routes include straight, bidirectional, dashed, fan-out, and orthogonal multi-point connectors ([`arch.svg:214-228`](../../fixtures/arch.svg#L214-L228), [`arch.svg:306-333`](../../fixtures/arch.svg#L306-L333)). They map naturally to arrows, but SVG does not encode node binding.
-5. **Fidelity gaps are real but localized.** Twenty-four filter uses create shadows; exact dash arrays, numeric corner radii, font weights, Inter metrics, one-sided rounded header paths, and curved icon paths cannot all be expressed natively.
+1. **Computed style is mandatory.** The `.card` rule supplies white fill while
+   individual presentation attributes supply card-specific strokes. Either
+   source alone is incomplete.
+2. **Reference and transform resolution are mandatory.** Thirteen icons inherit
+   paint through definition groups and `<use>` instances.
+3. **Document groups are not diagram semantics.** Cards combine filtered
+   rectangles with sibling icon and text elements, so mechanical `<g>`
+   mirroring does not reconstruct perceived cards.
+4. **Marker promotion must be conservative.** Twelve straight and orthogonal
+   connectors carry custom triangular markers. The current target keeps the
+   centerlines editable and preserves unrecognized marker artwork explicitly;
+   SVG still provides no node-binding contract.
+5. **Fidelity gaps are real but localized.** Twelve shadow filter uses, clip
+   boundaries, exact dash arrays, numeric corner radii, font weights, Inter
+   metrics, and curved icon paths cannot all be expressed natively.
 
-For this fixture the balanced profile should preserve all 86 text strings as editable text, emit lane/card rectangles and connector lines/arrows natively, expand and group icon instances, flatten only curved icon/header paths within tolerance, omit a provably cosmetic shadow within threshold or rasterize its isolation group, diagnose that choice, and preserve source paint order. It must not infer frames, card groups, or arrow bindings from proximity.
+For this fixture the balanced profile preserves all 131 text strings as
+editable text, emits card rectangles and connector lines natively, expands and
+groups icon instances, preserves marker artwork as geometry, rasterizes 12
+bounded clip islands, diagnoses every approximation, and preserves source paint
+order. It does not infer frames, card groups, or arrow bindings from proximity.
 
 ## Mapping algorithm
 
