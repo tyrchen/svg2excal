@@ -10,7 +10,7 @@ Before any Cargo manifest edit, current stable Rust and dependency versions MUST
 
 ## 1. Why dependency order differs from feature order
 
-Stakeholders first see “convert `arch.svg`,” but implementation cannot safely start with that fixture's tags. Deterministic target types, diagnostics, limits, and validation must exist before a parser can produce public data. Likewise, CSS/use/marker mapping depends on the dual source/paint model, and raster fallback depends on paint-island planning plus the file schema. Building in UI/fixture order would make every earlier contract provisional.
+Stakeholders first see “convert `rfc.svg`,” but implementation cannot safely start with that fixture's tags. Deterministic target types, diagnostics, limits, and validation must exist before a parser can produce public data. Likewise, CSS/use/marker mapping depends on the dual source/paint model, and raster fallback depends on paint-island planning plus the file schema. Building in UI/fixture order would make every earlier contract provisional.
 
 ## 2. Estimated effort
 
@@ -23,7 +23,7 @@ No production converter code lands in this phase.
 | # | Deliverable | Evidence | Effort |
 | --- | --- | --- | ---: |
 | 0.1 | Pin current upstream/dependency/toolchain versions and licenses | version/license table; `cargo info`; vendor pins | 0.5 d |
-| 0.2 | Characterize `arch.svg` through current usvg | resolved counts/styles/bounds; CSS conflict; use/marker/filter tree | 1 d |
+| 0.2 | Characterize `rfc.svg` through current usvg | resolved counts/styles/bounds; CSS conflict; use/marker/filter tree | 1 d |
 | 0.3 | Prove minimal hand-authored v2 JSON import/restore/render | pinned Excalidraw compatibility harness | 1 d |
 | 0.4 | Calibrate visual comparison and font baseline | 1×/2× reference render, font assets, frozen metric procedure | 1–2 d |
 | 0.5 | Record results and amend specs only if evidence contradicts them | dated research spike(s), index update | 0.5 d |
@@ -63,9 +63,9 @@ No production converter code lands in this phase.
 | 2.7 | Implement marker recognition, explicit arrowheads, and null bindings | [mapping §7](./svg-mapping-design.md#7-markers-and-arrows) | 3 d |
 | 2.8 | Implement target-font measurement, simple text mapping, span split predicate | [mapping §8](./svg-mapping-design.md#8-text-mapping) | 3–4 d |
 | 2.9 | Recognize bounded source-preserving `feDropShadow` and emit deterministic omission diagnostics | [mapping §4](./svg-mapping-design.md#4-paint-island-construction) | 1–2 d |
-| 2.10 | Complete `arch.svg` structural and pre-fallback visual acceptance | [verification §6](./svg-to-excalidraw-verification-plan.md#6-archsvg-acceptance) | 3 d |
+| 2.10 | Complete `rfc.svg` structural and pre-fallback visual acceptance | [verification §6](./svg-to-excalidraw-verification-plan.md#6-rfcsvg-acceptance) | 3 d |
 
-**Exit criteria:** M1 roadmap criteria pass. `arch.svg` has 86 native text strings, native representable cards/connectors, correct CSS/use/marker/transform behavior, stable groups/order, no invented frames/bindings, and complete approximation reporting.
+**Exit criteria:** M1 roadmap criteria pass. `rfc.svg` has 131 native text strings, native representable cards/connectors, correct CSS/use/marker/transform behavior, stable groups/order, no invented frames/bindings, and complete approximation reporting.
 
 **Verification:** full Rust gates; `make test-fixtures`; `make test-compat`; `make test-visual` for native/approximation regions; property tests for transforms, flattening, ordering, IDs, and target references.
 
@@ -78,9 +78,9 @@ No production converter code lands in this phase.
 | 3.3 | Implement existing raster image/nested-SVG policy | [ingestion §5](./svg-ingestion-design.md#5-resource-policy) | 2–3 d |
 | 3.4 | Implement fill/stroke split, compound-path editable decomposition budget, and complex text fallback | [mapping §§5–8](./svg-mapping-design.md#5-native-geometry-predicates) | 3–4 d |
 | 3.5 | Implement/freeze balanced, editable, fidelity, and strict decision matrices | [mapping §3](./svg-mapping-design.md#3-profile-policy) | 2 d |
-| 3.6 | Complete feature matrix and whole-image visual gates, including `arch.svg` shadows | [verification §§5–7](./svg-to-excalidraw-verification-plan.md#5-feature-matrix-fixtures) | 3–4 d |
+| 3.6 | Complete feature matrix and whole-image visual gates, including `rfc.svg` shadows | [verification §§5–7](./svg-to-excalidraw-verification-plan.md#5-feature-matrix-fixtures) | 3–4 d |
 
-**Exit criteria:** M2 roadmap criteria pass; every effective supported feature has a deterministic decision/report; minimal fallback boundaries and file integrity are proven; whole `arch.svg` balanced SSIM is at least 0.98 with all region gates.
+**Exit criteria:** M2 roadmap criteria pass; every effective supported feature has a deterministic decision/report; minimal fallback boundaries and file integrity are proven; whole `rfc.svg` balanced SSIM is at least 0.95 at 1× and 2× with all region gates.
 
 **Verification:** full Rust gates; all fixture/compat/visual targets; dependency audit/deny if manifests changed; exact rerun/hash tests for embedded PNGs.
 

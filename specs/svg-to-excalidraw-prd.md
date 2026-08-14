@@ -17,16 +17,20 @@ A user supplies an untrusted static SVG and receives:
 3. minimal embedded image fallbacks for unsupported effects/geometry;
 4. a deterministic, machine-readable report of every approximation, fallback, omission, and security rejection.
 
-For `fixtures/arch.svg`, titles and labels remain editable text, cards and lanes remain editable shapes, routed flows remain editable line/arrow elements, icons remain grouped editable vector approximations where budgets allow, z-order is preserved, and the shadow/font/dash/radius limitations are reported.
+For `fixtures/rfc.svg`, all titles and labels remain editable text, cards and
+lanes remain editable shapes, routed flows remain editable line elements,
+marker artwork remains explicit geometry, icons remain grouped editable vector
+approximations where budgets allow, z-order is preserved, and the
+shadow/font/dash/radius limitations are reported.
 
 ## 3. Goals
 
 | # | Goal | Measure |
 | --- | --- | --- |
 | G1 | Produce valid current Excalidraw JSON | Every accepted fixture loads through the pinned Excalidraw restore path with no dropped generated element or dangling reference |
-| G2 | Preserve editability | On `arch.svg`, 100% of its 86 text strings and all representable rectangles/straight or orthogonal connectors are native elements |
+| G2 | Preserve editability | On `rfc.svg`, 100% of its 131 text strings and all representable rectangles/straight or orthogonal connectors are native elements |
 | G3 | Preserve appearance honestly | Balanced-profile render differs from the reference by at most the thresholds in the verification plan; every threshold-exempt region has a diagnostic |
-| G4 | Be generic | The corpus covers every supported SVG element/style/effect class in the feature matrix, including constructs absent from `arch.svg` |
+| G4 | Be generic | The corpus covers every supported SVG element/style/effect class in the feature matrix, including constructs absent from `rfc.svg` |
 | G5 | Be deterministic | Identical bytes, options, explicit resource/font bytes, converter version, and target profile produce byte-identical JSON on every supported CI platform, including IDs, nonzero seeds, ordering, diagnostics, and embedded assets |
 | G6 | Be safe on hostile input | All byte/depth/count/decoded-asset/output/work limits fail with typed errors and no external I/O by default |
 | G7 | Be embeddable | Core conversion is synchronous and deterministic; the default path is I/O-free, external bytes require an explicit bounded resource provider, and custom fonts are caller-supplied bounded bytes |
@@ -63,7 +67,7 @@ For `fixtures/arch.svg`, titles and labels remain editable text, cards and lanes
 
 ## 6. Success metrics
 
-- `arch.svg` meets all fixture-specific structural assertions and visual budgets.
+- `rfc.svg` meets all fixture-specific structural assertions and calibrated visual budgets.
 - At least 95% of elements across the maintained “diagram-like SVG” corpus are native or bounded-vector approximations in balanced mode; fallback percentage is reported by painted area and element count.
 - Strict mode either produces an all-exact scene or returns `StrictFidelityViolation` with the complete ordered set of blocking diagnostics.
 - Corpus fuzzing and hostile-limit tests have zero panic, hang, uncontrolled allocation, external fetch, or filesystem escape.

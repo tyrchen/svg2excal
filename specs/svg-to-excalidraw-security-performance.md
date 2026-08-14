@@ -124,7 +124,7 @@ Reference hardware is documented in benchmark output and CI. Targets exclude col
 
 | Corpus class | Target |
 | --- | --- |
-| 25 KiB `arch.svg` | median ≤ 50 ms; peak RSS delta ≤ 64 MiB |
+| 24 KiB `rfc.svg` | median ≤ 50 ms; peak RSS delta ≤ 64 MiB |
 | 1 MiB / 5,000 nodes, no fallback | median ≤ 250 ms; p99 ≤ 2 s |
 | 10 MiB / 50,000 nodes, no fallback | ≤ 5 s within 512 MiB |
 | 16 MP single fallback | ≤ 2 s raster/encode on reference hardware |

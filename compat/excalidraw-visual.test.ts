@@ -5,8 +5,8 @@ import { restoreElements } from "../vendors/excalidraw/packages/excalidraw/data/
 import { exportToSvg } from "../vendors/excalidraw/packages/excalidraw/scene/export";
 
 describe("svg2excal visual export", () => {
-  it("restores and exports the canonical architecture scene", async () => {
-    const fixturePath = path.resolve("target/visual/arch.excalidraw");
+  it("restores and exports the canonical RFC scene", async () => {
+    const fixturePath = path.resolve("target/visual/rfc.excalidraw");
     const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
     const restored = restoreElements(fixture.elements as never, null);
 
@@ -23,10 +23,10 @@ describe("svg2excal visual export", () => {
       { skipInliningFonts: true },
     );
 
-    expect(svg.getAttribute("width")).toBe("2180");
-    expect(svg.getAttribute("height")).toBe("1420");
+    expect(svg.getAttribute("width")).toBe("1920");
+    expect(svg.getAttribute("height")).toBe("1080");
     fs.writeFileSync(
-      path.resolve("target/visual/arch-excalidraw.svg"),
+      path.resolve("target/visual/rfc-excalidraw.svg"),
       new XMLSerializer().serializeToString(svg),
     );
   });

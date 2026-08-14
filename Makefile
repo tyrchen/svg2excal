@@ -1,3 +1,5 @@
+PACKAGE_TARGET_DIR ?= target/publish
+
 build:
 	@cargo build
 
@@ -40,7 +42,44 @@ bench:
 bench-build:
 	@cargo bench -p svg2excal-core --bench conversion --no-run
 
-verify: build test test-fixtures test-hostile test-compat test-visual fuzz-build bench-build
+package:
+	@cmp -s fixtures/rfc.svg crates/core/fixtures/rfc.svg || { \
+		echo "The packaged RFC fixture is out of sync with fixtures/rfc.svg"; \
+		exit 1; \
+	}
+	@for package_license in crates/core/LICENSE.md apps/cli/LICENSE.md apps/server/LICENSE.md; do \
+		cmp -s LICENSE.md "$$package_license" || { \
+			echo "$$package_license is out of sync with LICENSE.md"; \
+			exit 1; \
+		}; \
+	done
+	@cargo package --workspace --locked --allow-dirty \
+		--target-dir "$(PACKAGE_TARGET_DIR)" $(CARGO_PACKAGE_FLAGS)
+	@package_dir="$(PACKAGE_TARGET_DIR)/package"; \
+	for crate_name in svg2excal-core svg2excal svg2excal-server; do \
+		version=$$(cargo pkgid -p "$$crate_name" | sed 's/.*@//'); \
+		archive="$$package_dir/$$crate_name-$$version.crate"; \
+		test -f "$$archive" || { echo "Missing package archive: $$archive"; exit 1; }; \
+		archive_size=$$(wc -c < "$$archive"); \
+		test "$$archive_size" -le 10485760 || { \
+			echo "Package exceeds crates.io's 10 MiB limit: $$archive"; \
+			exit 1; \
+		}; \
+	done
+
+update-font-assets:
+	@cp vendors/excalidraw/scripts/woff2/assets/LiberationSans-Regular.ttf \
+		crates/core/assets/fonts/LiberationSans-Regular.ttf
+	@cp vendors/excalidraw/scripts/woff2/assets/NotoEmoji-Regular.ttf \
+		crates/core/assets/fonts/NotoEmoji-Regular.ttf
+	@uvx --from 'fonttools[woff]==4.60.2' pyftsubset \
+		vendors/excalidraw/scripts/woff2/assets/Xiaolai-Regular.ttf \
+		--output-file=crates/core/assets/fonts/Xiaolai-Regular-Basic-CJK.ttf \
+		--unicodes='U+3000-303F,U+4E00-9FFF,U+F900-FAFF,U+FF00-FFEF' \
+		--layout-features='*' --no-hinting --name-IDs='*' --name-languages='*'
+	@shasum -a 256 crates/core/assets/fonts/*.ttf
+
+verify: build test test-fixtures test-hostile test-compat test-visual fuzz-build bench-build package
 	@cargo +nightly fmt --all -- --check
 	@cargo clippy --workspace --all-targets --all-features -- -D warnings -W clippy::pedantic
 	@cargo audit
@@ -63,13 +102,14 @@ check-agent-sync:
 	}
 
 release:
-	@cargo release tag --execute
-	@git cliff -o CHANGELOG.md
-	@git commit -a -n -m "Update CHANGELOG.md" || true
-	@git push origin master
-	@cargo release push --execute
+	@test -n "$(VERSION)" || { \
+		echo "Set VERSION to release, a SemVer level, or an explicit version"; \
+		exit 1; \
+	}
+	@$(MAKE) verify
+	@cargo release "$(VERSION)" --workspace --execute
 
 update-submodule:
 	@git submodule update --init --recursive --remote
 
-.PHONY: build test characterize test-compat test-fixtures test-visual test-hostile fuzz fuzz-build bench bench-build verify check-agent-sync release update-submodule
+.PHONY: build test characterize test-compat test-fixtures test-visual test-hostile fuzz fuzz-build bench bench-build package update-font-assets verify check-agent-sync release update-submodule

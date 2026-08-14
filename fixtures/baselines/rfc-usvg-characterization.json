@@ -1,0 +1,37 @@
+{
+  "fixtureBytes": 24213,
+  "width": 1920.0,
+  "height": 1080.0,
+  "sourceElements": {
+    "circle": 8,
+    "defs": 1,
+    "feDropShadow": 1,
+    "filter": 1,
+    "g": 22,
+    "line": 12,
+    "marker": 5,
+    "path": 21,
+    "rect": 46,
+    "style": 1,
+    "svg": 1,
+    "text": 131,
+    "use": 13
+  },
+  "sourceMaxDepth": 5,
+  "normalized": {
+    "groups": 63,
+    "filteredGroups": 12,
+    "paths": 100,
+    "lineOnlyPaths": 39,
+    "curvedPaths": 61,
+    "texts": 131,
+    "images": 0,
+    "solidFills": 63,
+    "solidStrokes": 80,
+    "paintServers": 0
+  },
+  "cssPresentationConflictResolvedFill": "#123456",
+  "bundledFont": "Liberation Sans Regular (Excalidraw-pinned TTF)",
+  "usvgVersion": "0.48.1",
+  "resvgVersion": "0.48.1"
+}

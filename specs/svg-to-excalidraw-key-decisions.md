@@ -127,7 +127,7 @@ Decisions are append-only. A future change supersedes a decision with a new ID a
 - **Alternatives considered:** always promote to `appState.viewBackgroundColor`; drop white backgrounds; profile-dependent magic.
 - **Decision:** Keep it as the bottom-most element in v1 and use white app background independently.
 - **Why:** It avoids semantic guessing and makes source paint explicit/editable.
-- **Pinned by:** [emission §3](./excalidraw-emission-design.md#3-document-envelope), [verification §6](./svg-to-excalidraw-verification-plan.md#6-archsvg-acceptance)
+- **Pinned by:** [emission §3](./excalidraw-emission-design.md#3-document-envelope), [verification §6](./svg-to-excalidraw-verification-plan.md#6-rfcsvg-acceptance)
 - **Date:** 2026-08-04
 
 ## D15 — Scale oversized scenes uniformly below target restoration limits

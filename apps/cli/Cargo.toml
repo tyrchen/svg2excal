@@ -1,12 +1,16 @@
 [package]
 name = "svg2excal"
-description = "Bounded command-line SVG to Excalidraw converter"
+description = "Deterministic, resource-bounded SVG and SVGZ to Excalidraw converter"
+categories = ["command-line-utilities", "graphics"]
+keywords = ["svg", "excalidraw", "diagram", "cli", "converter"]
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
+documentation = "https://docs.rs/svg2excal"
 repository.workspace = true
-homepage.workspace = true
+readme.workspace = true
+publish.workspace = true
 rust-version.workspace = true
 
 [dependencies]
