@@ -1,4 +1,5 @@
 PACKAGE_TARGET_DIR ?= target/publish
+FUZZ_HOST_TARGET ?= $(shell rustc -vV | sed -n 's/^host: //p')
 
 build:
 	@cargo build
@@ -28,13 +29,14 @@ test-hostile:
 	@cargo test -p svg2excal-core --test hostile
 
 fuzz:
-	@for target in svg_preflight style_parser source_correlation geometry target_validator; do \
-		cargo +nightly fuzz run $$target fuzz/corpus/$$target fixtures -- \
+	@for fuzz_target in svg_preflight style_parser source_correlation geometry target_validator; do \
+		cargo +nightly fuzz run --target "$(FUZZ_HOST_TARGET)" \
+			$$fuzz_target fuzz/corpus/$$fuzz_target fixtures -- \
 			-max_total_time=$${FUZZ_SECONDS:-30} -timeout=10 || exit 1; \
 	done
 
 fuzz-build:
-	@cargo +nightly fuzz build
+	@cargo +nightly fuzz build --target "$(FUZZ_HOST_TARGET)"
 
 bench:
 	@cargo bench -p svg2excal-core --bench conversion

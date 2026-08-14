@@ -46,6 +46,9 @@ are documented in [third-party assets](./svg2excal-third-party-assets.md).
   and alpha-aware fallback-border checks.
 - `make fuzz`: bounded campaigns for all five parser, correlation, geometry, and
   validator fuzz targets; `FUZZ_SECONDS` controls the per-target duration.
+  `FUZZ_HOST_TARGET` defaults to the host triple reported by `rustc` so
+  sanitizer builds never inherit the target baked into a prebuilt `cargo-fuzz`
+  executable.
 - `make bench`: Criterion end-to-end tiny, `rfc.svg`, 1 MiB/5,000-node,
   10 MiB/50,000-node, path-heavy, text-heavy, 16 MP fallback, deterministic
   rerun, serialization, and target-validation regressions.
